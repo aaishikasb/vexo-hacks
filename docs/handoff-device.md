@@ -523,3 +523,10 @@ PracticeSession.listen callback on com.apple.root.default-qos. Permission,
 recognition, and audio-tap callbacks now explicitly use @Sendable; UI updates
 remain on MainActor. Signed rebuild and installation passed; physical retry
 is requested. Crash reports remain outside Git.
+
+Physical retry confirmed by the user after installing a5f07c7: “Captured words
+and heard a reply.” This verifies explicit microphone capture, on-device
+recognition, Pipecat turn handling, Gemma reply generation, and playback through
+the selected output in one practice exchange. The reported callback crash did
+not recur in this retry. Repeated interruption/route-loss stress and band-to-cue
+checks with charged glasses remain unverified.
