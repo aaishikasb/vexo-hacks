@@ -60,7 +60,8 @@ actor CuePipeline {
             case .followUp, .reflectClarify: requiredSources = Set(dialogue.map(\.sourceID))
             case .situationalOpener: requiredSources = ["s1"]
             }
-            let allowedSources = requiredSources
+            let visualSources: Set<String> = scene.observations.isEmpty ? [] : ["s1"]
+            let allowedSources = requiredSources.union(visualSources)
             guard let exampleSource = requiredSources.sorted().first else { throw GeneratedFields.Failure.evidence }
             let exampleSourcesJSON = String(decoding: try JSONEncoder().encode([exampleSource]), as: UTF8.self)
             struct PromptEvidence: Encodable {
@@ -75,7 +76,7 @@ actor CuePipeline {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(PromptEvidence(sceneSourceID: "s1",
-                observations: decision.selectedAction == .situationalOpener ? scene.observations : [],
+                observations: scene.observations,
                 uncertain: scene.uncertain,
                 memories: decision.selectedAction == .personalConnection ? memories : [],
                 dialogue: [.followUp, .reflectClarify].contains(decision.selectedAction) ? dialogue : [],
@@ -89,7 +90,12 @@ actor CuePipeline {
             Only explicitly approved memories may be shared. Missing dialogue stays missing. Do not invent speech, shared history,
             interests, identities, or emotions. Do not claim the wearer already acted.
             The knownPoint is wearer-entered text, not a fact observed in the photo.
-            Cite at least one source from: \(requiredSources.sorted().joined(separator: ", ")).
+            Use the visible setting to make the cue relevant to this moment. If uncertain, treat the scene as tentative.
+            Connect a memory only when it naturally fits; never force a shared interest or imply someone else shares it.
+            Use plain, warm wording, without flattery, sales language, or a rehearsed-sounding speech.
+            Visual observations are context for every strategy. Cite s1 if the cue relies on them.
+            Allowed source IDs: \(allowedSources.sorted().joined(separator: ", ")).
+            You must ALSO cite at least one strategy source from: \(requiredSources.sorted().joined(separator: ", ")).
             Evidence JSON: \(String(decoding: data, as: UTF8.self))
             Return only JSON {"text":"...","sourceIDs":\(exampleSourcesJSON)}.
             Copy source IDs exactly from the allowed list; never invent, shorten, or prefix an ID.

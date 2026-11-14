@@ -25,6 +25,7 @@ struct AuditView: View {
                     Text(episode.decision.context.requestedAt, format: .dateTime.month().day().hour().minute())
                         .font(.caption).foregroundStyle(VocaTheme.secondary)
                 }
+                cueInfluences
                 if let report, report.status == .ready {
                     reportSection("A strength in your words", text: report.strength)
                     reportSection("Something you could try", text: report.opportunity)
@@ -112,6 +113,87 @@ struct AuditView: View {
         }.background(VocaTheme.background).foregroundStyle(VocaTheme.foreground)
             .scrollDismissesKeyboard(.interactively)
             .onDisappear { work?.cancel() }
+    }
+
+    private var cueInfluences: some View {
+        let context = episode.decision.context
+        let cited = Set(episode.cue?.sourceIDs ?? [])
+        return VStack(alignment: .leading, spacing: 16) {
+            Text("What shaped this cue").font(.headline).accessibilityAddTraits(.isHeader)
+            Text("Goal: \(context.goal.rawValue.capitalized) · \(strategyName(episode.decision.selectedAction))")
+                .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Photo context") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(context.scene.observedAt, format: .dateTime.hour().minute().second())
+                        .font(.caption).foregroundStyle(VocaTheme.secondary)
+                    Text(context.scene.uncertain ? "The scene was uncertain." : "Setting: \(context.scene.setting.rawValue.capitalized)")
+                    if context.scene.observations.isEmpty { Text("No visual details were identified.") }
+                    ForEach(Array(context.scene.observations.enumerated()), id: \.offset) { _, observation in
+                        Text(observation).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(cited.contains(context.scene.requestID.uuidString) ? "Photo context cited in this cue." : "Photo context saved with the request; not cited in this cue.")
+                        .font(.caption).foregroundStyle(VocaTheme.secondary)
+                }.padding(.top, 8)
+            }
+            let memories = context.snapshot.approvedMemories.filter { cited.contains($0.sourceID) }
+            let dialogue = context.snapshot.dialogue.filter { cited.contains($0.sourceID) }
+            if !memories.isEmpty {
+                DisclosureGroup("Memories cited (\(memories.count))") {
+                    ForEach(memories) { evidence in Text(evidence.text).padding(.top, 8).textSelection(.enabled) }
+                }
+            }
+            if !dialogue.isEmpty {
+                DisclosureGroup("Dialogue cited (\(dialogue.count))") {
+                    ForEach(dialogue) { evidence in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(evidence.text).textSelection(.enabled)
+                            Text(evidence.speaker ?? "Speaker unknown").font(.caption).foregroundStyle(VocaTheme.secondary)
+                        }.padding(.top, 8)
+                    }
+                }
+            }
+            if let source = context.knownPointSourceID, cited.contains(source), let point = context.knownPoint {
+                Text("Your point: \(point)").textSelection(.enabled)
+            }
+            DisclosureGroup("How your feedback shapes suggestions") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Helpful and unhelpful ratings on delivered cues update strategy preferences for similar contexts. Not tried, invalid evidence, and undelivered cues do not count as rewards.")
+                    Text("Strategy scores when this cue was requested:").font(.subheadline.weight(.medium))
+                    ForEach(episode.decision.eligibleActions, id: \.rawValue) { strategy in
+                        if let utility = episode.decision.utilities[strategy.rawValue] {
+                            Text("\(strategyName(strategy)): \(utility.formatted(.number.precision(.fractionLength(2))))")
+                                .font(.subheadline).monospacedDigit()
+                        }
+                    }
+                    Text("These are preference scores, not accuracy estimates. Learning is separate for each model, prompt version, and live or practice mode. Model weights stay fixed.")
+                        .font(.caption).foregroundStyle(VocaTheme.secondary)
+                    if let feedback = episode.feedback {
+                        Text("Your rating: \(feedbackName(feedback.verdict))")
+                    } else { Text("No rating recorded for this cue.") }
+                }.padding(.top, 8)
+            }
+            Text("This shows saved inputs and cited sources, not the model’s private reasoning. A citation does not guarantee that its wording is accurate.")
+                .font(.caption).foregroundStyle(VocaTheme.secondary)
+        }.font(.subheadline).vocaSurface()
+    }
+
+    private func strategyName(_ strategy: Strategy) -> String {
+        switch strategy {
+        case .followUp: "Ask a follow-up"
+        case .personalConnection: "Make a personal connection"
+        case .explainClearly: "Explain clearly"
+        case .reflectClarify: "Reflect and clarify"
+        case .situationalOpener: "Open with your surroundings"
+        }
+    }
+
+    private func feedbackName(_ verdict: FeedbackVerdict) -> String {
+        switch verdict {
+        case .helpful: "Helpful"
+        case .unhelpful: "Unhelpful"
+        case .notTried: "Not tried"
+        case .invalidEvidence: "Invalid evidence"
+        }
     }
 
     private func reportSection(_ title: String, text: String?) -> some View {

@@ -622,3 +622,26 @@ instrumented. Load/readiness 2.254 s; generation median/max 0.751/1.280 s.
 The app remains loaded with E2B. E4B 30/30 and E2B 30/30 are separate sustained
 runs; the interrupted combined run and failed E4B return-load are not passes.
 No glasses, microphone, playback, or reward verification was performed here.
+
+### Visual context and cue factors — 14 November 2026
+
+Restored scene observations to every strategy prompt. The previous citation
+hardening accidentally withheld them outside situationalOpener. Visual source
+s1 may now accompany the required strategy source; it cannot replace that source.
+Irrelevant memories/dialogue remain omitted. New prompt profile v3.0 separates
+this behavior from old policy namespaces; historical feedback is preserved but
+not automatically transferred across profiles. Added naturalness and relevance
+instructions, without claiming measured taste improvement.
+
+Review now shows saved scene observations/time/uncertainty, actual cited memory,
+dialogue and typed-point evidence, selected goal/strategy, frozen utility scores,
+and recorded feedback. These are persisted inputs/citations, not a generated
+causal explanation. Old cues show their original saved data.
+
+Checks: integrated host suite 71 passed; independent signed build/install passed.
+Physical E2B synthetic image/text run: 30/30 validated, cancellation rejected,
+post-cancellation generation validated. No glasses, microphone or speech used.
+Actual-source Simulator Review inspected at standard and accessibility3 text;
+expanded disclosure contents and VoiceOver were source-reviewed, not interacted.
+E4B new-prompt and fresh Ray-Ban capture remain unverified. Model weights remain
+fixed; ratings currently personalize strategy utility, not wording taste.

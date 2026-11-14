@@ -144,7 +144,7 @@ func cuePromptIncludesOnlySelectedStrategyEvidence(goal: Goal) async throws {
     let prompt = try #require(await model.prompts.first)
     #expect(!prompt.contains("UNIQUE_MEMORY_"))
     #expect(!prompt.contains("UNIQUE_DIALOGUE_"))
-    #expect(prompt.contains("UNIQUE_SCENE_") == (goal == .enter))
+    #expect(prompt.contains("UNIQUE_SCENE_"))
     #expect(prompt.contains("UNIQUE_POINT_") == (goal == .explain))
     #expect(cue.strategy == (goal == .enter ? .situationalOpener : .explainClearly))
     let episode = try #require(await coach.episodes().first)
@@ -174,4 +174,31 @@ func cueRejectsUnrelatedMemoryEvenAlongsideRequiredSource(goal: Goal) async thro
     let episode = try #require(await coach.episodes().first)
     #expect(episode.delivery == .failed)
     #expect(episode.cue == nil)
+}
+
+@Test(arguments: [true, false])
+func personalCueReceivesVisionButStillRequiresMemory(citeMemory: Bool) async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+    let now = Date()
+    let scene = SceneFacts(requestID: UUID(), observedAt: now, setting: .shop,
+        observations: ["VISUAL_CONTEXT_Handmade cups on a shelf"], uncertain: false)
+    let memory = Evidence(sourceID: "canonical-pottery-memory", text: "APPROVED_MEMORY_I make pottery",
+        speaker: "wearer", utteredAt: nil, shareApproved: true)
+    let model = ScopedEvidenceModel(sources: citeMemory ? ["s1", "m1"] : ["s1"])
+    let pipeline = CuePipeline(model: model, coach: coach)
+    let snapshot = MemorySnapshot(approvedMemories: [memory], dialogue: [], fetchedAt: now, coverage: .unavailable)
+    if citeMemory {
+        let cue = try await pipeline.prepare(scene: scene, requestedAt: now, goal: .deepen, knownPoint: nil, snapshot: snapshot)
+        #expect(cue.sourceIDs == [scene.requestID.uuidString, memory.sourceID])
+        #expect(cue.strategy == .personalConnection)
+    } else {
+        await #expect(throws: GeneratedFields.Failure.evidence) {
+            try await pipeline.prepare(scene: scene, requestedAt: now, goal: .deepen, knownPoint: nil, snapshot: snapshot)
+        }
+    }
+    let prompt = try #require(await model.prompts.first)
+    #expect(prompt.contains("VISUAL_CONTEXT_"))
+    #expect(prompt.contains("APPROVED_MEMORY_"))
 }
