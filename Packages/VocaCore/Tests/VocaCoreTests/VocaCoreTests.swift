@@ -89,7 +89,7 @@ final class VocaCoreTests: XCTestCase {
     }
 
     func testCueAttributionDeliveryFailuresAndEvidenceDeletion() async throws {
-        let engine = try CoachEngine(storeURL: tempURL()), c = makeContext()
+        let url = tempURL(), engine = try CoachEngine(storeURL: url), c = makeContext()
         let d = try await selected(engine, c)
         let wrongModel = CueResult(decisionID: d.context.decisionID, actualProfile: VocaFixtures.profile(.gemma4E2B), strategy: d.selectedAction, text: "Cue", sourceIDs: [])
         do { try await engine.recordDelivery(decisionID: d.context.decisionID, cue: wrongModel, status: .completed); XCTFail("model substitution accepted") } catch CoachEngineError.invalidCue {}
@@ -109,8 +109,13 @@ final class VocaCoreTests: XCTestCase {
         let cue2 = CueResult(decisionID: d2.context.decisionID, actualProfile: d2.context.profile, strategy: d2.selectedAction, text: "Cue", sourceIDs: ["turn-1"])
         try await engine.recordDelivery(decisionID: d2.context.decisionID, cue: cue2, status: .completed)
         try await engine.applyFeedback(FeedbackEvent(decisionID: d2.context.decisionID, verdict: .helpful, revision: 1))
-        try await engine.invalidateEvidence(sourceID: "turn-1")
-        do { try await engine.applyFeedback(FeedbackEvent(decisionID: d2.context.decisionID, verdict: .unhelpful, revision: 2)); XCTFail("deleted evidence retrained") } catch CoachEngineError.invalidFeedback {}
+        try await engine.deleteEvidence(sourceID: "turn-1")
+        let remaining = await engine.episodes()
+        XCTAssertFalse(remaining.contains { $0.id == d2.context.decisionID })
+        let persisted = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(persisted.contains("I started a community garden."))
+        do { try await engine.applyFeedback(FeedbackEvent(decisionID: d2.context.decisionID, verdict: .unhelpful, revision: 2)); XCTFail("deleted evidence retrained") } catch CoachEngineError.unknownDecision {}
+        do { _ = try await engine.selectCue(c2, explore: false, excluding: nil); XCTFail("deleted evidence reused") } catch CoachEngineError.invalidEvidenceReferences {}
     }
 
     func testContentDecodesAndReferencesAreValid() throws {

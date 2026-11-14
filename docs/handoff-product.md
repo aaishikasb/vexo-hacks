@@ -4,7 +4,7 @@
 
 - Foundation-only Swift package at `Packages/VocaCore` with canonical public contracts, `ModelGenerating`, `VoiceCoordinating`, content models, and a serialized `CoachEngine` actor.
 - `CoachEngine` freezes the canonical ten features and eligibility at selection; keys LinUCB history by model ID, artifact SHA-256, prompt version, and mode; persists pending decisions and cue/delivery/feedback atomically; enforces immutable terminal delivery; and replays corrected feedback in only the affected namespace.
-- Evidence deletion API: `invalidateEvidence(sourceID:)`. It clears associated rewards and blocks future feedback for the deleted context/source.
+- Evidence deletion API: `deleteEvidence(sourceID:)` (with `invalidateEvidence(sourceID:)` as a compatibility spelling). It removes complete affected episodes so transcript/memory text and their cue/reward derivations disappear from persisted history, replays remaining policy state, and blocks stale snapshots from reusing that source ID.
 - Labelled synthetic fixtures in `VocaFixtures` cover unknown speaker, stale/gapped dialogue, duplicate tap IDs, and interrupted delivery.
 - Compact coaching catalog and three simulated practice scenarios are in the owned `Resources/` directories. `CoachingContent.decode(cards:scenarios:)` checks unique IDs, HTTPS source links, and scenario principle references.
 
@@ -18,7 +18,8 @@ public func recordDelivery(decisionID: UUID, cue: CueResult?,
                            status: DeliveryStatus) throws
 public func applyFeedback(_ event: FeedbackEvent) throws
 public func episodes() -> [Episode]
-public func invalidateEvidence(sourceID: String) throws
+public func deleteEvidence(sourceID: String) throws
+public func invalidateEvidence(sourceID: String) throws // compatibility alias
 public static func features(for context: CueContext) -> [Double]
 ```
 
