@@ -1,13 +1,28 @@
 import Foundation
 import Observation
+import VocaCore
 
 @MainActor @Observable final class ModelLibrary {
     private(set) var artifacts: [ModelArtifact] = []
     private(set) var status = "Import a generic Gemma 4 model to begin."
     private let indexURL = ModelArtifact.directory.appending(path: "index.json")
-    #if canImport(VocaCore)
-    let executor = LiteRTExecutor()
-    #endif
+        let executor = LiteRTExecutor()
+        struct CatalogEntry: Decodable {
+        let modelID: String
+        let filename: String
+        let sha256: String
+    }
+    static var catalog: [CatalogEntry] {
+        guard let url = Bundle.main.url(forResource: "models", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode([CatalogEntry].self, from: data)) ?? []
+    }
+    func importStaged(modelID: String) async throws {
+        guard let entry = Self.catalog.first(where: { $0.modelID == modelID }) else { throw ModelArtifact.Failure.invalid }
+        let url = URL.documentsDirectory.appending(path: entry.filename)
+        try await importFile(url, modelID: modelID, expectedSHA256: entry.sha256)
+        try FileManager.default.removeItem(at: url)
+    }
     init() {
         do {
             if FileManager.default.fileExists(atPath: indexURL.path) {
@@ -16,6 +31,7 @@ import Observation
         } catch { status = "Model index could not be read. Reimport a model to recover." }
     }
     func importFile(_ url: URL, modelID: String, expectedSHA256: String) async throws {
+        status = "Verifying and importing model…"
         let artifact = try await ModelArtifact.importFile(url, modelID: modelID, expectedSHA256: expectedSHA256)
         var next = artifacts.filter { $0.modelID != modelID }
         next.append(artifact)
@@ -23,12 +39,46 @@ import Observation
         artifacts = next
         status = "Model imported and SHA-256 verified."
     }
-    #if canImport(VocaCore)
-    func load(modelID: String) async throws {
+        func load(modelID: String) async throws {
         guard let artifact = artifacts.first(where: { $0.modelID == modelID }) else { throw ModelArtifact.Failure.invalid }
         status = "Loading model…"
         do { try await executor.load(artifact); status = "Model loaded. A device inference check is still required." }
         catch { status = "Model failed to load. Select another imported model to recover."; throw error }
     }
-    #endif
+    }
+
+#if DEBUG
+extension ModelLibrary {
+    func checkOnDevice(modelID: String) async {
+        var result: [String: Any] = ["modelID": modelID, "passed": false]
+        func report() {
+            if let data = try? JSONSerialization.data(withJSONObject: result) {
+                try? data.write(to: URL.documentsDirectory.appending(path: "model-check.json"), options: .atomic)
+            }
+        }
+        do {
+            result["stage"] = "importing"; report()
+            if !artifacts.contains(where: { $0.modelID == modelID }) { try await importStaged(modelID: modelID) }
+            result["stage"] = "loading"; report()
+            let start = Date()
+            try await load(modelID: modelID)
+            result["loadSeconds"] = Date().timeIntervalSince(start)
+            let profile = try await executor.activeProfile()
+            result["artifactSHA256"] = profile.artifactSHA256
+            for index in 0..<2 {
+                result["stage"] = "generating\(index)"; report()
+                let request = ModelRequest(requestID: UUID(), kind: .cue, requestedProfile: profile,
+                    prompt: "Return only JSON with text and sourceIDs. Text must be exactly: Voca is ready to help you find your own words. sourceIDs must be [\"diagnostic\"].",
+                    maxOutputTokens: 128, responseSchemaJSON: CuePipeline.cueSchema)
+                let began = Date()
+                let response = try await executor.generate(request)
+                try response.validate(for: request)
+                _ = try GeneratedFields.cue(response.text, allowedSources: ["diagnostic"])
+                result["generation\(index)Seconds"] = Date().timeIntervalSince(began)
+            }
+            result["passed"] = true; result["stage"] = "completed"
+        } catch { result["stage"] = "failed"; result["error"] = error.localizedDescription }
+        report()
+    }
 }
+#endif

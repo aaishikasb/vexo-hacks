@@ -48,3 +48,43 @@ import Testing
     #expect(BandProtocol.responseMatches(sequence: 255, opcode: 1, status: 5, dataCount: 0, expectedSequence: 255, expectedOpcode: 1, expectedLength: 16))
     #expect(!BandProtocol.responseMatches(sequence: 255, opcode: 1, status: 5, dataCount: 16, expectedSequence: 255, expectedOpcode: 1, expectedLength: 16))
 }
+
+@Test func assignedBand18RejectsNearbyAndConflictingIdentities() {
+    let services = [BandProtocol.service.uppercased()]
+    #expect(BandProtocol.matches(number: 18, services: services, name: "Vexo-HACK-18", manufacturer: Data([255,255,79,1,18,0])))
+    #expect(BandProtocol.matches(number: 18, services: services, name: "Vexo-HACK-18", manufacturer: nil))
+    #expect(!BandProtocol.matches(number: 18, services: services, name: "Vexo-HACK-180", manufacturer: nil))
+    #expect(!BandProtocol.matches(number: 18, services: services, name: "Vexo-HACK-18", manufacturer: Data([255,255,79,1,19,0])))
+    #expect(!BandProtocol.matches(number: 18, services: services, name: nil, manufacturer: Data([255,255,79,2,18,0])))
+    #expect(!BandProtocol.matches(number: 18, services: services, name: nil, manufacturer: nil))
+    #expect(throws: (any Error).self) { try BandProtocol.parse(Data([0x13,0,0,0])) }
+}
+
+@Test func acknowledgedStreamMasksMustMatchRequestedMicrophoneState() throws {
+    try BandProtocol.validateStreams(Data([2,0]), required: 2, stopped: 0x88)
+    try BandProtocol.validateStreams(Data([10,0]), required: 8)
+    try BandProtocol.validateStreams(Data([2,0]), stopped: 0x88)
+    #expect(throws: (any Error).self) { try BandProtocol.validateStreams(Data([2,0]), required: 8) }
+    #expect(throws: (any Error).self) { try BandProtocol.validateStreams(Data([0x82,0]), stopped: 0x88) }
+    #expect(throws: (any Error).self) { try BandProtocol.validateStreams(Data([10,0]), stopped: 0x88) }
+    #expect(throws: (any Error).self) { try BandProtocol.validateStreams(Data([0])) }
+}
+
+@Test func tapDiagnosticsRetainOrderingWithoutTreatingDoubleAsSingle() throws {
+    var taps = BandTapHistory()
+    let received = Date(timeIntervalSince1970: 10)
+    let first = taps.record(milliseconds: UInt32.max - 100, code: 1, receivedAt: received)
+    #expect(first)
+    let second = taps.record(milliseconds: 50, code: 2, receivedAt: received.addingTimeInterval(0.2))
+    #expect(second)
+    let duplicate = taps.record(milliseconds: 50, code: 2, receivedAt: received.addingTimeInterval(0.3))
+    #expect(!duplicate)
+    #expect(taps.observations.map(\.code) == [1, 2, 2])
+    #expect(taps.observations.last?.duplicate == true)
+    #expect(taps.observations[1].receivedAt == received.addingTimeInterval(0.2))
+    let unknown = taps.record(milliseconds: 60, code: 99, receivedAt: received)
+    #expect(!unknown)
+    for time in 100..<140 { taps.record(milliseconds: UInt32(time), code: 1, receivedAt: received) }
+    #expect(taps.observations.count == 32)
+    #expect(taps.observations.last?.milliseconds == 139)
+}

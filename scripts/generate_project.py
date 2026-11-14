@@ -49,7 +49,7 @@ if (ROOT / 'Packages/VocaCore/Package.swift').exists():
     product = obj('VocaCore', isa='XCSwiftPackageProductDependency', productName='VocaCore')
     products.append(product)
     linked.append(obj('core-link', isa='PBXBuildFile', productRef=product))
-for path in sorted((ROOT / 'Resources').rglob('*.json')):
+for path in sorted([*(ROOT / 'Resources').rglob('*.json'), ROOT / 'config/models.json']):
     name = str(path.relative_to(ROOT))
     ref = obj(name, isa='PBXFileReference', lastKnownFileType='text.json', path=name, sourceTree='<group>')
     files.append(ref)

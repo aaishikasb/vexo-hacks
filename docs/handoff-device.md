@@ -177,3 +177,54 @@ recalled “Voca is ready to find your own words”; the configured phrase remai
 Next build-order step is the serialized Gemma photo-to-cue path, requiring the
 canonical Core handoff and user-imported, hash-verified model artifacts.
 Route-loss interruption and speech with concurrent Gemma remain unverified.
+
+### Core and first cue flow integrated
+
+Integrated Machine 2 ready SHAs `7156e47` and `4477d87` as local commits
+`315d177` and `db614c6`. Core's 9 tests pass. Removed temporary canImport build
+gates and corrected LiteRT actor calls. The signed app builds with scene
+generation, validated 8–18-word cue generation, persisted Core selection,
+Pipecat/native delivery, explicit feedback, and pending-episode recovery.
+Current snapshot deliberately contains no memories or dialogue; no such
+evidence is invented. Memory editing, audits, and practice remain outstanding.
+
+Official generic E4B/E2B downloads have verified SHA-256 hashes recorded in
+`config/models.json`; artifacts remain ignored. E4B is staged on the phone for
+actual load/generation checks. No model inference pass is claimed at this point.
+
+Band 18 connection and tap receipt were user-confirmed in Voca. Agent review
+added START/STOP acknowledgement checks, empty-Opus rejection, bounded tap
+history, and listening-generation cleanup. These compile in the integrated
+iPhone build. Ordered single/double behavior, microphone sample, native iPhone
+Opus and local transcription still require physical tests.
+
+### Reviewed Machine 2 branch merge — 14 November 2026
+
+Merged `learning-product` through `60cc07d` into `device-inference` at
+`8f63592`, resolving the earlier cherry-picked Core files to Machine 2's reviewed
+versions. This includes approved-memory source checks, attributed partner
+freshness, duplicate decision rejection, and all nine coaching cards. Existing
+uncommitted app work was preserved.
+
+Validation against the integrated working tree: Core 10 tests passed; root
+`swift test` 14 device fixtures passed. Regenerated the Xcode project and built
+scheme `Voca` with `GIT_LFS_SKIP_SMUDGE=1 xcodebuild -project Voca.xcodeproj
+-scheme Voca -destination 'generic/platform=iOS' -derivedDataPath .build/iPhone
+CODE_SIGNING_ALLOWED=NO build`: BUILD SUCCEEDED. This was an unsigned physical-iOS
+target build, not a Simulator run or device runtime validation. No installation,
+model execution, or wearable test was performed in this merge checkpoint.
+
+### Published first cue integration
+
+The first photo → Gemma scene/cue → Pipecat/native playback flow is wired in
+`CuePipeline` and `CoachingSession`. Core selection is persisted before cue
+generation, live exploration defaults off, and only successful native playback
+acknowledged through Pipecat permits completed delivery and feedback. Cancelled
+or failed playback cannot train the policy. Snapshots have no invented dialogue
+or personal memories. Existing band diagnostics and microphone cleanup changes
+are included because the integrated Session screen consumes them.
+
+Fresh validation: Core 10 tests, device/cue 14 tests, Pipecat host 2 tests; all
+passed. Regenerated project; unsigned generic-iOS Voca build succeeded. These
+are host/build results: the full photo-to-Gemma-to-glasses loop, rendered UI,
+and device interruption behavior remain to be verified on hardware.

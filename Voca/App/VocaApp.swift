@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import VocaCore
 
 @main struct VocaApp: App {
     @State private var camera = GlassesCamera()
@@ -30,9 +31,11 @@ struct SetupView: View {
     @Bindable var camera: GlassesCamera
     @Bindable var band: BandClient
     @State private var models = ModelLibrary()
+    @State private var coaching = CoachingSession()
     @State private var selectedModel = "gemma4E4B"
     @State private var expectedSHA256 = ""
     @State private var importingModel = false
+    @State private var checkingModel = false
     @State private var audio = NativeAudio()
     @State private var pipecat = PipecatSpeech()
     @State private var listening = BandListening()
@@ -72,7 +75,7 @@ struct SetupView: View {
                         Button("Speak test phrase through Pipecat") {
                             run { try await pipecat.speak("Voca is ready to help you find your own words.") }
                         }.disabled(!pipecat.ready)
-                        Text("Native audio test only. This does not verify Pipecat or record a coaching delivery.").font(.footnote).foregroundStyle(.secondary)
+                        Text("The native test bypasses Pipecat. Neither test records a coaching delivery.").font(.footnote).foregroundStyle(.secondary)
                     }
                     Section("Assigned band") {
                         TextField("Number printed on your band’s bag", text: $bandNumber).keyboardType(.numberPad)
@@ -86,6 +89,13 @@ struct SetupView: View {
                         }
                         Text(band.status)
                         Text(band.lastEvent).font(.caption).foregroundStyle(.secondary)
+                        DisclosureGroup("Tap timing diagnostics") {
+                            if band.taps.observations.isEmpty { Text("Connect the assigned band, then try separate single and double taps.") }
+                            ForEach(Array(band.taps.observations.enumerated()), id: \.offset) { _, event in
+                                Text("\(event.code == 1 ? "Single" : "Double") · \(event.milliseconds) ms\(event.duplicate ? " · duplicate" : "")")
+                                    .font(.caption).monospacedDigit()
+                            }
+                        }
                         Button("Capture a 10-second local transcript") { showCaptureConsent = true }.disabled(band.info == nil || listening.active)
                         Button("Stop listening") { Task { await listening.stop(band: band) } }
                         Text(listening.status)
@@ -105,14 +115,41 @@ struct SetupView: View {
                         ForEach(models.artifacts, id: \.modelID) { artifact in
                             Text("\(artifact.modelID) · SHA-256 \(artifact.sha256)").font(.caption).textSelection(.enabled)
                         }
-                        #if canImport(VocaCore)
-                        Button("Load selected model") { run { try await models.load(modelID: selectedModel) } }
-                        #endif
+                        Button("Import staged official model") { run { try await models.importStaged(modelID: selectedModel) } }
+                        Button("Load selected model") { run {
+                            await coaching.stop(voice: pipecat, executor: models.executor)
+                            try await models.load(modelID: selectedModel)
+                        } }
                         Text("Use the generic artifact, not a device-specific accelerator build. Models stay on this iPhone and are excluded from backup.").font(.footnote).foregroundStyle(.secondary)
                     }
-                    Section("Coaching setup") {
-                        Text("Coaching will become available after the Core package, model import, and embedded voice runtime are integrated.")
-                            .foregroundStyle(.secondary)
+                    Section("Your cue") {
+                        Picker("Conversation goal", selection: $coaching.goal) {
+                            Text("Enter").tag(Goal.enter)
+                            Text("Deepen").tag(Goal.deepen)
+                            Text("Explain").tag(Goal.explain)
+                        }
+                        if coaching.goal == .explain {
+                            TextField("Point you want to explain", text: $coaching.knownPoint, axis: .vertical)
+                        }
+                        Text(coaching.status)
+                        Button("Request a spoken cue") {
+                            coaching.request(model: models.executor, camera: camera, voice: pipecat)
+                        }.disabled(coaching.busy || !camera.ready || !pipecat.ready)
+                        Button("Cancel cue") {
+                            Task { await coaching.stop(voice: pipecat, executor: models.executor) }
+                        }.disabled(!coaching.busy)
+                        if let episode = coaching.episodes.last, let cue = episode.cue {
+                            Text(cue.text).font(.headline)
+                            Text("Delivery: \(episode.delivery.rawValue)").font(.caption)
+                            if episode.delivery == .completed {
+                                ForEach([FeedbackVerdict.helpful, .unhelpful, .notTried], id: \.self) { verdict in
+                                    Button(verdict == .helpful ? "Helpful" : verdict == .unhelpful ? "Unhelpful" : "Not tried") {
+                                        Task { await coaching.feedback(verdict, episode: episode) }
+                                    }
+                                }
+                                if let feedback = episode.feedback { Text("Saved: \(feedback.verdict.rawValue)").font(.caption) }
+                            }
+                        }
                     }
                     if let error = operation.error { Section { Text(error).foregroundStyle(.red) } }
                 }
@@ -124,12 +161,32 @@ struct SetupView: View {
                     .navigationTitle("Review")
             }.tabItem { Label("Review", systemImage: "text.bubble") }
             NavigationStack {
-                ContentUnavailableView("Your stories stay yours", systemImage: "lock", description: Text("Only attributable stories you explicitly approve can be shared in a cue. Memory storage is awaiting Core integration."))
+                ContentUnavailableView("Your stories stay yours", systemImage: "lock", description: Text("Only attributable stories you explicitly approve can be shared in a cue. Memory editing is not connected in this build."))
                     .navigationTitle("Memory")
             }.tabItem { Label("Memory", systemImage: "person.text.rectangle") }
         }
+        .disabled(checkingModel)
         .task {
+            await coaching.configure()
+            expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selectedModel })?.sha256 ?? ""
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--speech-check") {
+                let transcriber = LocalTranscriber()
+                var result: [String: Any] = ["passed": false]
+                do { try await transcriber.start(); result["passed"] = true }
+                catch { result["error"] = error.localizedDescription }
+                transcriber.stop()
+                if let data = try? JSONSerialization.data(withJSONObject: result) {
+                    try? data.write(to: URL.documentsDirectory.appending(path: "speech-check.json"), options: .atomic)
+                }
+            }
+            if ProcessInfo.processInfo.arguments.contains("--model-check") {
+                checkingModel = true
+                UIApplication.shared.isIdleTimerDisabled = true
+                await models.checkOnDevice(modelID: selectedModel)
+                UIApplication.shared.isIdleTimerDisabled = false
+                checkingModel = false
+            }
             if ProcessInfo.processInfo.arguments.contains("--pipecat-check") {
                 pipecat.start(audio: audio)
                 for _ in 0..<100 {
@@ -143,6 +200,9 @@ struct SetupView: View {
                 }
             }
             #endif
+        }
+        .onChange(of: selectedModel) { _, selected in
+            expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selected })?.sha256 ?? ""
         }
         .fileImporter(isPresented: $importingModel, allowedContentTypes: [.data]) { result in
             switch result {
@@ -158,7 +218,7 @@ struct SetupView: View {
             Button("Cancel", role: .cancel) {}
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { camera.suspendForBackground(); pipecat.stop(); audio.deactivate(); Task { await listening.stop(band: band) } }
+            if phase == .background { camera.suspendForBackground(); pipecat.stop(); audio.deactivate(); Task { await coaching.stop(voice: pipecat, executor: models.executor); await listening.stop(band: band) } }
         }
     }
     private func run(cameraTimeout: Bool = false, _ action: @escaping @MainActor () async throws -> Void) {

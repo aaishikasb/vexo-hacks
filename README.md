@@ -4,9 +4,9 @@ Native iPhone conversation companion in active development. **The complete
 coaching loop is not yet integrated.** This checkpoint provides the signed-app
 setup path, glasses camera client, assigned-band BLE transport, native audio
 route test, consented on-device transcription sample, and verified model import.
-Review and Memory currently show honest empty/setup states. Core, coaching
-content, full conversation orchestration, audits, practice, and learned feedback
-integration remain pending. The speech-only embedded Pipecat adapter passed its physical-phone test:
+Core policy, persistence, and coaching content are integrated. The first photo-to-cue
+flow and explicit feedback controls are implemented. Review and Memory still show
+empty states; memory editing, audits, and practice remain pending. The speech-only embedded Pipecat adapter passed its physical-phone test:
 the user heard the phrase through the glasses and confirmed completed playback.
 
 ## Open and build
@@ -84,17 +84,25 @@ and the Xcode workspace's committed `Package.resolved`.
    unknown; sample text is not saved or promoted to approved personal memory.
 7. Import a generic E4B/E2B `.litertlm` file through Files with its independently
    verified SHA-256. Artifacts are copied into Application Support/Voca/Models,
-   hashed in chunks, and excluded from backup and Git. Model execution controls
-   become available only once Core is integrated. No automatic model startup
+   hashed in chunks, and excluded from backup and Git. Model execution uses the integrated Core interfaces. No automatic model startup
    retries are used. A user-selected fallback remains possible after load failure.
 
 ## Integration status
 
-Machine 2 owns `Packages/VocaCore` and coaching resources. No duplicate shared
-contracts were created. `LiteRTExecutor.swift` imports Core conditionally so
-independent device setup can build while that package is absent; **its Core-bound
-implementation is not yet compiled or verified**. Remove this temporary boundary
-once the real package and product integration are ready.
+Machine 2’s reviewed branch through `60cc07d` is integrated by merge `8f63592`.
+Canonical contracts are imported directly; no duplicate types exist.
+Core’s ten tests pass. The Core-enabled LiteRT executor and cue flow build for
+the physical iPhone. Cue decisions are persisted before generation; only full
+native playback records completion and permits explicit feedback.
+
+Fetch the official generic models using `python3 scripts/fetch_models.py`.
+`config/models.json` pins repository revisions, sizes, and SHA-256 hashes.
+Models live under ignored `.local/models/`. Transfer each file to Voca's
+Documents directory with `devicectl device copy to`, then select that model and
+use **Import staged official model**. Alternatively use the Files importer.
+Load one model, start the glasses camera and embedded Pipecat, confirm the
+output route, select Enter, and use **Request a spoken cue**. A model switch
+cancels and awaits current cue work before releasing the old engine.
 
 The pinned Pipecat reference includes its modified mobile fork. The app now
 bundles its Python runtime and a custom speech-only FrameProcessor adapter;

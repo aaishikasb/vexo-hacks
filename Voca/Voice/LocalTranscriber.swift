@@ -15,6 +15,7 @@ import Speech
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var generation = 0
+    private var starting = false
     private var origin: Date?
     private var hasGap = false
     private var timeout: Task<Void, Never>?
@@ -22,21 +23,26 @@ import Speech
     var onError: ((Error) -> Void)?
 
     func start() async throws {
-        guard task == nil else { throw Failure.busy }
+        guard task == nil, !starting else { throw Failure.busy }
+        starting = true
+        defer { starting = false }
+        generation += 1
+        let current = generation
         let authorization = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in continuation.resume(returning: status) }
         }
+        try Task.checkCancellation()
+        guard current == generation else { throw CancellationError() }
         guard authorization == .authorized else { throw Failure.denied }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
               recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { throw Failure.unavailable }
-        generation += 1
-        let current = generation
+        timeout?.cancel(); timeout = nil
         origin = nil; hasGap = false
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         self.request = request
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        task = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let final = result?.isFinal ?? false
             let offset = result?.bestTranscription.segments.last.map { $0.timestamp + $0.duration }

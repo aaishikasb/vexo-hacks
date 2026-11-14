@@ -9,6 +9,8 @@ import Observation
     var onSingleTap: (() -> Void)?
     var onAudio: ((Data, BandAudioTimeline.Packet) -> Void)?
     var onAudioGap: (() -> Void)?
+    var onListeningEnded: ((String) -> Void)?
+    private(set) var taps = BandTapHistory()
     // Enable only after the assigned band's single/double detector timing is verified.
     var tapMappingVerified = false
     private var central: CBCentralManager?
@@ -20,7 +22,7 @@ import Observation
     private var linkGeneration = 0
     private var pending: Pending?
     private var scanTimeout: Task<Void, Never>?
-    private var lastTap: UInt32?
+    private var verified = false
     private var timeline = BandAudioTimeline()
     private var listening = false
 
@@ -38,6 +40,8 @@ import Observation
         guard peripheral == nil, self.assignedNumber == nil else { throw BandProtocol.Failure.busy }
         linkGeneration += 1
         self.assignedNumber = assignedNumber
+        taps = BandTapHistory()
+        lastEvent = "No tap received"
         status = "Checking Bluetooth…"
         central = CBCentralManager(delegate: self, queue: .main)
     }
@@ -110,8 +114,12 @@ import Observation
                 let verified = try BandProtocol.Info(data, assignedNumber: number)
                 info = verified
                 guard verified.supportsEvents else { throw BandProtocol.Failure.unsupported }
-                _ = try await command(0x11, args: BandProtocol.mask(0xffff), expectedLength: 2)
-                _ = try await command(0x10, args: BandProtocol.mask(2), expectedLength: 2)
+                let stopped = try await command(0x11, args: BandProtocol.mask(0xffff), expectedLength: 2)
+                try BandProtocol.validateStreams(stopped, stopped: 0xffff)
+                let started = try await command(0x10, args: BandProtocol.mask(2), expectedLength: 2)
+                try BandProtocol.validateStreams(started, required: 2, stopped: 0x88)
+                guard linkGeneration == current else { throw BandProtocol.Failure.disconnected }
+                self.verified = true
                 scanTimeout?.cancel()
                 status = "Band \(number) connected · firmware \(verified.firmware)"
             } catch {
@@ -162,31 +170,42 @@ import Observation
         case let .event(time, code, _):
             guard info != nil, code == 1 || code == 2 else { return }
             lastEvent = "\(code == 1 ? "Single" : "Double") tap at band time \(time) ms"
-            guard code == 1, time != lastTap else { return }
-            lastTap = time
-            if tapMappingVerified { onSingleTap?() }
+            let fresh = taps.record(milliseconds: time, code: code, receivedAt: Date())
+            if fresh, code == 1, tapMappingVerified { onSingleTap?() }
         case let .audio(seq, opus):
             guard listening, let packet = timeline.accept(sequence: seq, receivedAt: Date()) else { return }
             if packet.missingPackets > 0 { onAudioGap?() }
             onAudio?(opus, packet)
         case let .notice(code, arg):
             if code == 3, arg == 3 { onAudioGap?() }
-            if code == 2 { listening = false; onAudioGap?(); status = "Band battery critical. Listening stopped." }
+            if code == 2 {
+                listening = false
+                onAudioGap?()
+                status = "Band battery critical. Listening stopped."
+                onListeningEnded?(status)
+            }
         case .unknown: break
         }
     }
     func startListening() async throws {
+        guard verified else { throw BandProtocol.Failure.disconnected }
         guard info?.supportsAudio == true else { throw BandProtocol.Failure.unsupported }
         guard !listening else { return }
         timeline.restart(commandSentAt: Date(), micAlreadyOn: false)
         listening = true
-        do { _ = try await command(0x10, args: BandProtocol.mask(8), expectedLength: 2) }
+        do {
+            let response = try await command(0x10, args: BandProtocol.mask(8), expectedLength: 2)
+            try BandProtocol.validateStreams(response, required: 8)
+        }
         catch { disconnect(message: "Cannot start band listening. Reconnect and try again."); throw error }
     }
     func stopListening() async {
         listening = false
         guard peripheral != nil else { return }
-        do { _ = try await command(0x11, args: BandProtocol.mask(0x88), expectedLength: 2) }
+        do {
+            let response = try await command(0x11, args: BandProtocol.mask(0x88), expectedLength: 2)
+            try BandProtocol.validateStreams(response, stopped: 0x88)
+        }
         catch { disconnect(message: "Disconnected to stop the microphone.") }
     }
     func disconnect(message: String = "Not connected") {
@@ -195,13 +214,14 @@ import Observation
         scanTimeout?.cancel()
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral = nil; rx = nil; tx = nil; info = nil; assignedNumber = nil
-        listening = false; lastTap = nil; tapMappingVerified = false
+        listening = false; verified = false; tapMappingVerified = false
         if let pending {
             self.pending = nil
             pending.timeout.cancel()
             pending.continuation.resume(throwing: BandProtocol.Failure.disconnected)
         }
         onAudioGap?()
+        onListeningEnded?(message)
         status = message
     }
 }

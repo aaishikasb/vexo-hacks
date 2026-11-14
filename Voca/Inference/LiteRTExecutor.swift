@@ -1,11 +1,20 @@
-#if canImport(VocaCore)
-// shortcut: Core is not delivered yet; remove this build gate after the canonical package is integrated.
 import Foundation
 import LiteRTLM
 import VocaCore
 
 actor LiteRTExecutor: ModelGenerating {
-    enum Failure: Error { case notLoaded, switching, invalidRequest, profileMismatch, outputLimit }
+    enum Failure: LocalizedError {
+        case notLoaded, switching, invalidRequest, profileMismatch, outputLimit
+        var errorDescription: String? {
+            switch self {
+            case .notLoaded: "Import and load a model before requesting a cue."
+            case .switching: "Wait for the model switch to finish."
+            case .invalidRequest: "The model request exceeded supported limits."
+            case .profileMismatch: "The model changed during this request. Request a new cue."
+            case .outputLimit: "The model response was too long. Request a new cue."
+            }
+        }
+    }
     private struct Job {
         let request: ModelRequest
         let result: CheckedContinuation<ModelResponse, Error>
@@ -36,7 +45,7 @@ actor LiteRTExecutor: ModelGenerating {
         }
         let config = try EngineConfig(modelPath: url.path, backend: .gpu, visionBackend: .cpu(), maxNumTokens: 4096, cacheDir: URL.cachesDirectory.path)
         let newEngine = Engine(engineConfig: config)
-        try newEngine.initialize()
+        try await newEngine.initialize()
         try Task.checkCancellation()
         engine = newEngine
         profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.1")
@@ -71,8 +80,9 @@ actor LiteRTExecutor: ModelGenerating {
     private func execute(_ request: ModelRequest) async throws -> ModelResponse {
         guard let engine, let profile else { throw Failure.notLoaded }
         let config = ConversationConfig(thinkingConfig: ThinkingConfig(enableThinking: false), automaticToolCalling: false, enableResponseFormat: request.responseSchemaJSON != nil)
-        let conversation = try engine.createConversation(with: config)
+        let conversation = try await engine.createConversation(with: config)
         self.conversation = conversation
+        guard !cancelled.contains(request.requestID) else { throw CancellationError() }
         var contents: [Content] = [.text(request.prompt)]
         if let image = request.imageJPEG { contents.append(.imageData(image)) }
         let format = try request.responseSchemaJSON.map { try ResponseFormat.json(schema: $0) }
@@ -108,4 +118,3 @@ actor LiteRTExecutor: ModelGenerating {
         lhs.modelID == rhs.modelID && lhs.artifactSHA256 == rhs.artifactSHA256 && lhs.promptVersion == rhs.promptVersion
     }
 }
-#endif

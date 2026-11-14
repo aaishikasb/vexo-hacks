@@ -62,7 +62,7 @@ nonisolated enum BandProtocol {
             let time = UInt32(b[1]) | UInt32(b[2]) << 8 | UInt32(b[3]) << 16 | UInt32(b[4]) << 24
             return .event(milliseconds: time, code: b[5], argument: b[6])
         case 0x13:
-            guard b.count >= 4, Int(b[3]) == b.count - 4 else { throw Failure.malformed }
+            guard b.count > 4, Int(b[3]) == b.count - 4 else { throw Failure.malformed }
             return .audio(sequence: u16(b, 1), opus: Data(b.dropFirst(4)))
         default: return .unknown
         }
@@ -71,6 +71,12 @@ nonisolated enum BandProtocol {
                                 expectedSequence: UInt8, expectedOpcode: UInt8, expectedLength: Int) -> Bool {
         sequence == expectedSequence && opcode == expectedOpcode &&
             (status == 0 ? dataCount == expectedLength : dataCount == 0)
+    }
+    static func validateStreams(_ data: Data, required: UInt16 = 0, stopped: UInt16 = 0) throws {
+        let bytes = [UInt8](data)
+        guard bytes.count == 2 else { throw Failure.malformed }
+        let active = u16(bytes, 0)
+        guard active & required == required, active & stopped == 0 else { throw Failure.unsupported }
     }
     static func u16(_ bytes: [UInt8], _ offset: Int) -> UInt16 {
         UInt16(bytes[offset]) | UInt16(bytes[offset + 1]) << 8
@@ -108,5 +114,23 @@ nonisolated struct BandAudioTimeline {
         }
         previous = sequence
         return Packet(captureEstimate: start.addingTimeInterval(Double(index) * 0.02), receivedAt: receivedAt, missingPackets: missing)
+    }
+}
+
+/// Retains receipt ordering for detector calibration; never treats timing as a verified gesture mapping.
+nonisolated struct BandTapHistory {
+    struct Observation: Sendable {
+        let milliseconds: UInt32
+        let code: UInt8
+        let receivedAt: Date
+        let duplicate: Bool
+    }
+    private(set) var observations: [Observation] = []
+    @discardableResult mutating func record(milliseconds: UInt32, code: UInt8, receivedAt: Date) -> Bool {
+        guard code == 1 || code == 2 else { return false }
+        let duplicate = observations.contains { $0.milliseconds == milliseconds && $0.code == code }
+        observations.append(Observation(milliseconds: milliseconds, code: code, receivedAt: receivedAt, duplicate: duplicate))
+        if observations.count > 32 { observations.removeFirst(observations.count - 32) }
+        return !duplicate
     }
 }
