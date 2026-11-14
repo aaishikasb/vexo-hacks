@@ -14,6 +14,54 @@ import VocaCore
             return response
         }
     }
+    static func replayFailedCues(models: ModelLibrary) async {
+        var result: [String: Any] = ["replay": true]
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            try await models.load(modelID: "gemma4E2B")
+            let history = try CoachEngine(storeURL: URL.applicationSupportDirectory.appending(path: "Voca/Coaching/episodes.json"))
+            let failed = await history.episodes().filter { $0.delivery == .failed && $0.cue == nil }.suffix(5)
+            let temporaryCoach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+            var checks: [[String: Any]] = []
+            for episode in failed {
+                let context = episode.decision.context
+                do {
+                    _ = try await CuePipeline(model: models.executor, coach: temporaryCoach).prepare(scene: context.scene,
+                        requestedAt: context.requestedAt, goal: context.goal, knownPoint: context.knownPoint, snapshot: context.snapshot)
+                    checks.append(["passed": true])
+                } catch { checks.append(["passed": false, "error": error.localizedDescription]) }
+            }
+            result["checks"] = checks
+        } catch { result["error"] = error.localizedDescription }
+        if let data = try? JSONSerialization.data(withJSONObject: result) {
+            try? data.write(to: URL.documentsDirectory.appending(path: "failed-cue-replay.json"), options: .atomic)
+        }
+    }
+
+    static func checkCueFormat(models: ModelLibrary) async {
+        var result: [String: Any] = ["fixture": true, "passed": 0]
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            try await models.load(modelID: "gemma4E2B")
+            let model = RecordingModel(base: models.executor)
+            let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+            var passed = 0
+            for _ in 0..<5 {
+                let scene = SceneFacts(requestID: UUID(), observedAt: Date(), setting: .cafe,
+                    observations: ["A coffee menu and two chairs are visible."], uncertain: false)
+                _ = try await CuePipeline(model: model, coach: coach).prepare(scene: scene,
+                    requestedAt: Date(), goal: .enter, knownPoint: nil)
+                passed += 1
+                result["passed"] = passed
+            }
+        } catch { result["error"] = error.localizedDescription }
+        if let data = try? JSONSerialization.data(withJSONObject: result) {
+            try? data.write(to: URL.documentsDirectory.appending(path: "cue-format-check.json"), options: .atomic)
+        }
+    }
+
     static func run(models: ModelLibrary) async {
         var result: [String: Any] = ["fixture": true, "auditPassed": false, "practicePassed": false]
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)

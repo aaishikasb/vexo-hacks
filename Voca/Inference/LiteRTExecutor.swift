@@ -56,7 +56,7 @@ actor LiteRTExecutor: ModelGenerating {
         engine = newEngine
         engineConfig = config
         recoveryCount = 0
-        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.7-approved-memory-review")
+        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.8-source-bound-cues")
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         try Task.checkCancellation()

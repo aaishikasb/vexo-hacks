@@ -18,6 +18,12 @@ actor CuePipeline {
         let fields = try GeneratedFields.scene(sceneResponse.text)
         guard let setting = Setting(rawValue: fields.setting) else { throw GeneratedFields.Failure.fields }
         let scene = SceneFacts(requestID: sceneID, observedAt: observedAt, setting: setting, observations: fields.observations, uncertain: fields.uncertain)
+        return try await prepare(scene: scene, requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
+    }
+
+    func prepare(scene: SceneFacts, requestedAt: Date, goal: Goal, knownPoint: String?, snapshot: MemorySnapshot? = nil) async throws -> CueResult {
+        let profile = try await model.activeProfile()
+        let sceneID = scene.requestID
         let decisionID = UUID()
         let point = knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines)
         let pointSourceID = point?.isEmpty == false ? "user-input:\(decisionID.uuidString)" : nil
@@ -41,6 +47,8 @@ actor CuePipeline {
             case .situationalOpener: requiredSources = [sceneID.uuidString]
             }
             let allowedSources = Set([sceneID.uuidString] + [pointSourceID].compactMap { $0 }).union(memoryIDs).union(dialogueIDs)
+            guard let exampleSource = requiredSources.sorted().first else { throw GeneratedFields.Failure.evidence }
+            let exampleSourcesJSON = String(decoding: try JSONEncoder().encode([exampleSource]), as: UTF8.self)
             let data = try JSONEncoder().encode(decision.context)
             let prompt = """
             Give the wearer one natural, actionable conversation cue of 8–18 words.
@@ -50,8 +58,9 @@ actor CuePipeline {
             interests, identities, or emotions. Do not claim the wearer already acted.
             The knownPoint is wearer-entered text, not a fact observed in the photo.
             Cite at least one source from: \(requiredSources.sorted().joined(separator: ", ")).
-            Return only JSON {"text":"...","sourceIDs":["source ID"]}.
             Evidence JSON: \(String(decoding: data, as: UTF8.self))
+            Return only JSON {"text":"...","sourceIDs":\(exampleSourcesJSON)}.
+            Copy source IDs exactly from the allowed list; never invent, shorten, or prefix an ID.
             """
             let request = ModelRequest(requestID: UUID(), decisionID: context.decisionID, kind: .cue,
                 requestedProfile: profile, prompt: prompt, maxOutputTokens: 128, responseSchemaJSON: Self.cueSchema)

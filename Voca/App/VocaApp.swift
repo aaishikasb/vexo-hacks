@@ -194,6 +194,16 @@ struct SetupView: View {
                 UIApplication.shared.isIdleTimerDisabled = false
                 checkingModel = false
             }
+            if ProcessInfo.processInfo.arguments.contains("--cue-format-check") {
+                checkingModel = true
+                UIApplication.shared.isIdleTimerDisabled = true
+                if ProcessInfo.processInfo.arguments.contains("--replay-failed-cues") {
+                    await ReviewModelCheck.replayFailedCues(models: models)
+                } else { await ReviewModelCheck.checkCueFormat(models: models) }
+                UIApplication.shared.isIdleTimerDisabled = false
+                softwareReady = (try? await models.executor.activeProfile()) != nil
+                checkingModel = false
+            }
             if ProcessInfo.processInfo.arguments.contains("--review-model-check") {
                 checkingModel = true
                 UIApplication.shared.isIdleTimerDisabled = true
@@ -493,7 +503,10 @@ Form {
                     Text(feedback.verdict == .helpful ? "Saved as helpful" : feedback.verdict == .unhelpful ? "Saved as unhelpful" : "Saved as not tried")
                         .font(.subheadline).foregroundStyle(VocaTheme.secondary)
                 }
-            } else { Text(episode.cue == nil ? "No cue was delivered. You can request another from Session." : "Only a fully spoken cue can be rated.").font(.subheadline).foregroundStyle(VocaTheme.secondary) }
+            } else {
+                Text(coaching.failureReasons[episode.id] ?? (episode.cue == nil ? "This attempt ended before speech. A detailed reason was not saved for this older attempt." : "Only a fully spoken cue can be rated."))
+                    .font(.subheadline).foregroundStyle(VocaTheme.secondary)
+            }
         }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             .background(VocaTheme.surface, in: RoundedRectangle(cornerRadius: 24))
     }

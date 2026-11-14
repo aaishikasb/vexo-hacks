@@ -9,6 +9,8 @@ import VocaCore
     private(set) var episodes: [Episode] = []
     private(set) var busy = false
     private(set) var lastError: String?
+    private(set) var failureReasons: [UUID: String] = [:]
+    private var failureDirectory: URL?
     private var coach: CoachEngine?
     var isConfigured: Bool { coach != nil }
     private var work: Task<Void, Never>?
@@ -27,6 +29,14 @@ import VocaCore
             }
             coach = store
             episodes = await store.episodes()
+            let failures = directory.appending(path: "Failures", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: failures, withIntermediateDirectories: true)
+            failureDirectory = failures
+            for episode in episodes where episode.delivery != .completed {
+                if let reason = try? String(contentsOf: failures.appending(path: episode.id.uuidString + ".txt"), encoding: .utf8) {
+                    failureReasons[episode.id] = reason
+                }
+            }
         } catch { status = "Coaching history could not be opened. Your existing data has been preserved. Restart Voca to retry."; lastError = status }
     }
 
@@ -48,6 +58,7 @@ import VocaCore
                     cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
                         requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
                 } catch LiteRTExecutor.Failure.nativeFailure where requestedProfile.modelID == .gemma4E4B {
+                    await recordFailure("E4B native inference failed after its recovery attempt. Voca attempted E2B fallback.", requestedAt: requestedAt, modelID: .gemma4E4B)
                     try Task.checkCancellation()
                     status = "E4B recovery failed. Loading E2B fallback for this cue…"
                     try await models.load(modelID: "gemma4E2B")
@@ -72,10 +83,24 @@ import VocaCore
                 }
                 status = error is CancellationError ? "Cue cancelled." : error.localizedDescription
                 lastError = error is CancellationError ? nil : status
+                await recordFailure(status, requestedAt: requestedAt)
             }
             episodes = await coach.episodes()
             busy = false; work = nil
         }
+    }
+
+    private func recordFailure(_ reason: String, requestedAt: Date, modelID: ModelID? = nil) async {
+        guard let coach, let directory = failureDirectory else { return }
+        let attempts = await coach.episodes()
+        guard let episode = attempts.last(where: {
+            $0.decision.context.requestedAt == requestedAt && $0.delivery != .completed &&
+            (modelID == nil || $0.decision.context.profile.modelID == modelID)
+        }) else { return }
+        let message = String(reason.prefix(1500))
+        failureReasons[episode.id] = message
+        try? Data(message.utf8).write(to: directory.appending(path: episode.id.uuidString + ".txt"),
+                                     options: [.atomic, .completeFileProtection])
     }
 
     func stop(voice: PipecatSpeech, executor: LiteRTExecutor) async {
@@ -87,8 +112,13 @@ import VocaCore
 
     func deleteEvidence(sourceID: String) async throws {
         guard let coach else { throw CoachEngineError.persistenceFailure }
+        let previousIDs = Set(episodes.map(\.id))
         try await coach.deleteEvidence(sourceID: sourceID)
         episodes = await coach.episodes()
+        for id in previousIDs.subtracting(episodes.map(\.id)) {
+            failureReasons.removeValue(forKey: id)
+            if let directory = failureDirectory { try? FileManager.default.removeItem(at: directory.appending(path: id.uuidString + ".txt")) }
+        }
     }
 
     func feedback(_ verdict: FeedbackVerdict, episode: Episode) async {

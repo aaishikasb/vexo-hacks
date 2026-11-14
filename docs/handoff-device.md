@@ -530,3 +530,37 @@ recognition, Pipecat turn handling, Gemma reply generation, and playback through
 the selected output in one practice exchange. The reported callback crash did
 not recur in this retry. Repeated interruption/route-loss stress and band-to-cue
 checks with charged glasses remain unverified.
+
+
+### Mentor-demo cue failure investigation — 2026-11-14
+
+Read-only inspection found five failed records at 14:29 Pacific: one E4B
+attempt plus its E2B fallback under the same request time, then three further
+E2B requests. All five have cue=nil; none reached validated cue playback.
+The 14:29:27 native diagnostic identifies E4B cue generation, imageBytes=0,
+status5 NOT_FOUND / No per-layer embeddings found in inputs. It does not
+establish why the four E2B attempts failed: the old build did not persist
+per-attempt validation errors. Earlier E2B deliveries used prompt v2.6; failed
+attempts used v2.7. This is correlation, not a proven prompt regression.
+
+New attempts persist/display failure reasons. The DEBUG no-hardware E2B
+cue-format check passed five synthetic cafe scenes with unchanged v2.7.
+A failed-context replay uses a separate temporary CoachEngine, no speech,
+no rewards, and no mutation of real history. Private exports stay outside Git.
+
+Failed-context replay reproduced unsupported-evidence rejection in 5/5 E2B
+outputs; the user independently reported the same exact error. The synthetic
+cafe check had passed 5/5, so this is context-sensitive. Restored a concrete
+allowed source ID in the output example (rather than literal "source ID"),
+placed the answer shape after the evidence, and explicitly prohibited altered
+IDs. Source validation remains strict. Prompt profile bumped to
+voca-v2.8-source-bound-cues; delayed feedback retains the original namespace.
+Signed build and 35 host tests passed; physical same-context replay pending.
+
+Physical E2B same-context replay after the citation fix: 5/5 passed, versus
+0/5 before. No speech, new camera capture, rewards, or writes to real history
+were involved. E2B remains loaded after the diagnostic. E4B's separate native
+missing-per-layer-embeddings failure remains unresolved; full fresh-photo to
+spoken-cue fallback requires a device regression. New failed attempts retain
+individual reasons in the protected Coaching/Failures directory and show them
+in history; deleting dependent episodes also removes those diagnostics.
