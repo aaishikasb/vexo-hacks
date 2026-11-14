@@ -1,7 +1,8 @@
 # Machine 1 checkpoint — 14 November 2026
 
 Branch: `device-inference`. This is a **device-setup checkpoint, not the integrated product**.
-Ready implementation commit: `d9efade7628da3eaece9c4471dfb284f533d7071` (local; not pushed).
+Ready implementation commit: `7ba437e17a6ce23832ad9f23f388afbcdf16a17e` (local; not pushed).
+Initial device foundation: `d9efade7628da3eaece9c4471dfb284f533d7071`.
 A following documentation-only commit records this SHA.
 
 ## Implemented
