@@ -52,7 +52,8 @@ and the Xcode workspace's committed `Package.resolved`.
 1. Connect/unlock the iPhone, trust this Mac, enable Developer Mode. Actual check
    on 14 November: iPhone 18 Pro Max, iOS 27.2, paired, wired, Developer Mode enabled.
 2. Connect glasses through Meta AI using the app. Camera permission opens Meta AI;
-   start the camera and request a photo. Photos remain in app memory. The supplied
+   start the camera and request a photo. Already-granted permission is reused;
+   startup reports its stage and times out with a retry path. Photos remain in app memory. The supplied
    Meta AI/glasses/DAT versions are user-reported baselines; compatibility with
    resolved iOS DAT 1.0.1 still needs a real capture test.
 3. Select glasses as the iPhone audio output, then confirm that route in the app.

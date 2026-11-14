@@ -29,8 +29,7 @@ struct SetupView: View {
     @State private var listening = BandListening()
     @State private var showCaptureConsent = false
     @State private var bandNumber = ""
-    @State private var error: String?
-    @State private var busy = false
+    @State private var operation = OperationState()
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         TabView {
@@ -43,8 +42,8 @@ struct SetupView: View {
                     }
                     Section("Glasses") {
                         Text(camera.status)
-                        Button("Connect with Meta AI") { run { try await camera.register() } }
-                        Button("Start glasses camera") { run { try await camera.start() } }
+                        Button("Connect with Meta AI") { run(cameraTimeout: true) { try await camera.register() } }
+                        Button("Start glasses camera") { run(cameraTimeout: true) { try await camera.start() } }
                         Button("Capture context photo") { run { _ = try await camera.photo() } }.disabled(!camera.ready)
                         if let jpeg = camera.previewJPEG, let photo = UIImage(data: jpeg) {
                             Image(uiImage: photo).resizable().scaledToFit().accessibilityLabel("Latest context photo from your glasses")
@@ -55,7 +54,7 @@ struct SetupView: View {
                         Text(audio.currentOutput.isEmpty ? "No output available" : audio.currentOutput)
                         Text(audio.status)
                         Button("Confirm this output is my glasses") {
-                            do { try audio.confirmGlassesRoute() } catch { self.error = error.localizedDescription }
+                            do { try audio.confirmGlassesRoute() } catch { operation.error = error.localizedDescription }
                         }
                         Button("Speak native test phrase") { run { try await audio.speak("Voca is ready to help you find your own words.") } }
                         Button("Stop speech") { audio.stop() }
@@ -69,7 +68,7 @@ struct SetupView: View {
                             do {
                                 guard let number = Int(bandNumber) else { throw BandProtocol.Failure.identity }
                                 try band.connect(assignedNumber: number)
-                            } catch { self.error = "Enter the exact number on your band’s bag (1–999), then try again." }
+                            } catch { operation.error = "Enter the exact number on your band’s bag (1–999), then try again." }
                         }
                         Text(band.status)
                         Text(band.lastEvent).font(.caption).foregroundStyle(.secondary)
@@ -101,9 +100,9 @@ struct SetupView: View {
                         Text("Coaching will become available after the Core package, model import, and embedded voice runtime are integrated.")
                             .foregroundStyle(.secondary)
                     }
-                    if let error { Section { Text(error).foregroundStyle(.red) } }
+                    if let error = operation.error { Section { Text(error).foregroundStyle(.red) } }
                 }
-                .overlay { if busy { ProgressView("Working…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).allowsHitTesting(false) } }
+                .overlay { if operation.busy { ProgressView("Working…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).allowsHitTesting(false) } }
                 .navigationTitle("Session")
             }.tabItem { Label("Session", systemImage: "bubble.left.and.bubble.right") }
             NavigationStack {
@@ -121,7 +120,7 @@ struct SetupView: View {
                 let model = selectedModel
                 let hash = expectedSHA256
                 run { try await models.importFile(url, modelID: model, expectedSHA256: hash) }
-            case .failure(let failure): error = failure.localizedDescription
+            case .failure(let failure): operation.error = failure.localizedDescription
             }
         }
         .confirmationDialog("Everyone nearby must agree to microphone capture. Audio is transcribed on this iPhone; the band Bluetooth link is not encrypted. Keep the blue microphone light visible.", isPresented: $showCaptureConsent, titleVisibility: .visible) {
@@ -129,15 +128,14 @@ struct SetupView: View {
             Button("Cancel", role: .cancel) {}
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { camera.stop(); audio.deactivate(); Task { await listening.stop(band: band) } }
+            if phase == .background { camera.suspendForBackground(); audio.deactivate(); Task { await listening.stop(band: band) } }
         }
     }
-    private func run(_ operation: @escaping @MainActor () async throws -> Void) {
-        guard !busy else { return }
-        busy = true; error = nil
-        Task {
-            defer { busy = false }
-            do { try await operation() } catch { self.error = error.localizedDescription }
-        }
+    private func run(cameraTimeout: Bool = false, _ action: @escaping @MainActor () async throws -> Void) {
+        operation.run(timeout: cameraTimeout ? .seconds(25) : nil, onTimeout: {
+            let stage = camera.status
+            camera.stop()
+            return "Meta AI did not finish: \(stage) Close and reopen Voca, then retry Start glasses camera."
+        }, action)
     }
 }

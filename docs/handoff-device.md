@@ -1,7 +1,8 @@
 # Machine 1 checkpoint — 14 November 2026
 
 Branch: `device-inference`. This is a **device-setup checkpoint, not the integrated product**.
-Ready implementation commit: see the latest `device-inference` commit (the SHA is recorded in the follow-up handoff entry).
+Ready implementation commit: `d9efade7628da3eaece9c4471dfb284f533d7071` (local; not pushed).
+A following documentation-only commit records this SHA.
 
 ## Implemented
 
@@ -31,10 +32,11 @@ Ready implementation commit: see the latest `device-inference` commit (the SHA i
 
 ## Passing checks
 
-- `swift test --scratch-path /tmp/voca-device-build`: **7 Swift Testing tests pass**.
+- `swift test --scratch-path /tmp/voca-device-build`: **9 Swift Testing tests pass**.
   Identity matching, malformed frames/GET_INFO, unknown event handling, audio
   wrap/gap/restart/duplicates, outstanding-command matching, native synthetic Opus
-  silence, cue/source/schema validation, and scene/audit field rejection.
+  silence, cue/source/schema validation, scene/audit field rejection, bounded UI-operation timeout, duplicate-action suppression,
+  and a late SDK callback not clearing a newer operation.
   These are **Mac fixtures**, not physical-band measurements.
 - Signed Debug arm64 iPhone build, scheme `Voca`: **passes** with Xcode 27.2 /
   Swift 6.4.2. Command in README. Latest build log: `/tmp/voca-signed.log`.
@@ -51,7 +53,7 @@ Ready implementation commit: see the latest `device-inference` commit (the SHA i
 - Physical iPhone 18 Pro Max, iOS 27.2: wired, paired, Developer Mode enabled.
 - User selected Personal Team and trusted its developer profile. A signed app
   was installed and successfully launched through devicectl.
-- Camera capture/Meta compatibility: awaiting user-run check.
+- Camera capture/Meta compatibility: user granted Always Allow, but startup remained in Working without a photo. Recovery build installed: checks existing permission, retains the selector, reports registration/compatibility/session state, and bounds UI wait to 25 seconds and stream startup to 15 seconds. Awaiting retest; camera checkpoint has NOT passed.
 - No assigned band number or scan authorization was provided; **no agent band
   scan/connection/capture was performed**.
 - No measured Gemma cold/warm latency, memory, thermal, locked-phone behavior,
