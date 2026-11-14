@@ -56,7 +56,7 @@ A following documentation-only commit records this SHA.
   was installed and successfully launched through devicectl.
 - Camera capture passed: real JPEG received over documented Bluetooth Classic.
 - User confirmed hearing the full native test phrase through the glasses.
-- Embedded Pipecat startup passed on the phone; audible Pipecat phrase pending.
+- Embedded Pipecat startup passed on the phone; user confirmed the full Pipecat phrase through glasses and completed playback.
 - Assigned band is 18; user is unsure which client owns its reported connection.
   No agent band scan/connection/capture was performed.
 - No measured Gemma cold/warm latency, memory, thermal, locked-phone behavior,
@@ -84,14 +84,14 @@ the product handoff. Do not implement hardware or voice dependencies in Core.
    full Session/Review/Memory flows, persisted decisions, eligible feedback,
    learning demonstration, audit, practice, and provenance integration remain.
 2. Pipecat embedded startup now passes; native speech adapter is implemented.
-   Audible Pipecat phrase, canonical VoiceCoordinating, Gemma adapter, and
+   Canonical VoiceCoordinating, Gemma adapter, and
    practice orchestration still require completion. The earlier missing-fork
    diagnosis was incorrect; the pinned reference includes the mobile fork.
 3. Gemma artifacts must be imported with known hashes. Executor cancellation,
    priority, warmup, E2B session switching, and attribution need Core-backed tests
    and real-device validation before enabling the coaching path. Currently load
    is manual; failed load does not create a startup retry loop.
-4. Camera and native phrase passed; await audible Pipecat speech proof. Only after explicit assigned-band authorization perform GET_INFO/tap
+4. Camera, native phrase, and Pipecat phrase passed. Only after explicit assigned-band authorization perform GET_INFO/tap
    timing checks, then consented decoding/transcription checks.
 5. No demo video/submission claim should describe this checkpoint as a complete
    coaching product. Model weights remain fixed; no learning claim is verified.
@@ -166,4 +166,14 @@ tests passed against the real pinned fork (completion gating/stale and duplicate
 acknowledgements; cancelled playback). This is a speech-only integration step,
 not yet the canonical VoiceCoordinating service or Gemma/practice orchestration.
 Simulator Python extension build is not prepared yet; previous Simulator results
-predate this runtime addition. Awaiting user confirmation of audible Pipecat phrase.
+predate this runtime addition. User confirmed hearing the full phrase through the glasses and seeing completed playback on November 14. This is a user-observed physical-device pass, not an acoustic recording or latency measurement.
+
+### Pipecat speech checkpoint confirmed
+
+Implementation commit: `fe80f8f`. User heard the fixed Voca phrase through the
+glasses and confirmed “Pipecat speech playback completed.” The follow-up
+recalled “Voca is ready to find your own words”; the configured phrase remains
+“Voca is ready to help you find your own words.” No recording was made.
+Next build-order step is the serialized Gemma photo-to-cue path, requiring the
+canonical Core handoff and user-imported, hash-verified model artifacts.
+Route-loss interruption and speech with concurrent Gemma remain unverified.

@@ -6,8 +6,8 @@ setup path, glasses camera client, assigned-band BLE transport, native audio
 route test, consented on-device transcription sample, and verified model import.
 Review and Memory currently show honest empty/setup states. Core, coaching
 content, full conversation orchestration, audits, practice, and learned feedback
-integration remain pending. A speech-only embedded Pipecat adapter is available
-for the next device check.
+integration remain pending. The speech-only embedded Pipecat adapter passed its physical-phone test:
+the user heard the phrase through the glasses and confirmed completed playback.
 
 ## Open and build
 

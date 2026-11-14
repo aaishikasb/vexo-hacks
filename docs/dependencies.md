@@ -6,7 +6,7 @@
 | Meta DAT iOS 1.0.1 | `0bd369298eef6a980ad0bdb6c8a5502f2c02a08c` | Physical camera capture passed; SDK reports compatible. |
 | Meta sample main | `bbae597cd1c748cd29b9375a1624a8d75b1c9e14` | Inspected; use SDK framework interfaces as API authority. Sample and release API names can differ. |
 | Vexo Open Kit | `1e4291e2fa4896b1f603d3d4f0b009c483425da0` | Read contract v1.1 and docs/speech.md. Native parser and synthetic Opus checks pass on Mac. No band connection performed. |
-| Pipecat iOS reference | `6a204432df5cd533abb85e0577a7e79dccd93a04` | Packaged Python 3.13.14 and native pydantic-core 2.46.5; embedded Pipecat startup passed on iPhone. Audible Pipecat phrase pending. |
+| Pipecat iOS reference | `6a204432df5cd533abb85e0577a7e79dccd93a04` | Packaged Python 3.13.14 and native pydantic-core 2.46.5; embedded Pipecat startup passed on iPhone. User confirmed full phrase through glasses and completed playback. |
 | Official Pipecat main | `1bc2e37b15566cd34bb6941a335ce09c3bbbab8c` | Inspected, NOT a tested mobile runtime pin. Required Apple adapters absent. |
 
 ## Pipecat packaging status
