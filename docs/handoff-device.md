@@ -367,3 +367,12 @@ No speech playback or reward is fabricated by the harness. E2B glasses playback,
 physical cancellation with the new complete-response path, and switching under
 active load remain separate checks. Existing personal feedback stays in its old
 profile namespace. Concurrent Machine 2 Core/test/doc changes were preserved.
+
+### E2B glasses playback confirmed
+
+User confirmed the complete E2B cue played through the glasses after starting
+the camera, confirming glasses audio output, and requesting Enter. This verifies
+the physical fallback photo → E2B → Pipecat/native playback path on build
+`e50c472`, in addition to the two ten-cue device generation runs. Long-duration
+stability, cancellation under load, and active-work model switching remain
+unverified. No feedback verdict was inferred from successful playback.
