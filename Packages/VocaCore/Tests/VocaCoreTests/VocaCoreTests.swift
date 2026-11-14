@@ -189,6 +189,65 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(correctedE2B.utilities[original.selectedAction.rawValue], 0)
     }
 
+    func testFailedPersistenceRollsBackFeedbackAndPreservesLastStore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let backup = directory.appendingPathExtension("backup")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: backup)
+        }
+        let url = directory.appendingPathComponent("episodes.json")
+        let engine = try CoachEngine(storeURL: url)
+        let context = makeContext(story: false)
+        let decision = try await completedDecision(engine, context: context)
+        let before = await engine.episodes()
+        let saved = try Data(contentsOf: url)
+        // Block the parent path deterministically, without relying on filesystem permissions.
+        try FileManager.default.moveItem(at: directory, to: backup)
+        try Data().write(to: directory)
+        let feedback = FeedbackEvent(decisionID: context.decisionID, verdict: .helpful, revision: 1)
+        do {
+            try await engine.applyFeedback(feedback)
+            XCTFail("Failed write accepted feedback")
+        } catch CoachEngineError.persistenceFailure {}
+        let after = await engine.episodes()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("episodes.json")), saved)
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.moveItem(at: backup, to: directory)
+        try await engine.applyFeedback(feedback)
+        let reopened = try CoachEngine(storeURL: url)
+        var next = context; next.decisionID = UUID()
+        let learned = try await selected(reopened, next)
+        XCTAssertEqual(learned.utilities[decision.selectedAction.rawValue]!, 0.8, accuracy: 1e-9)
+    }
+
+    func testArtifactAndPromptNamespacesAndDuplicateFeedback() async throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try CoachEngine(storeURL: url)
+        let context = makeContext(story: false)
+        let decision = try await completedDecision(engine, context: context)
+        let feedback = FeedbackEvent(decisionID: context.decisionID, verdict: .helpful, revision: 1)
+        try await engine.applyFeedback(feedback)
+        try await engine.applyFeedback(feedback)
+        let reopened = try CoachEngine(storeURL: url)
+        var next = context; next.decisionID = UUID()
+        let learned = try await selected(reopened, next)
+        XCTAssertEqual(learned.utilities[decision.selectedAction.rawValue]!, 0.8, accuracy: 1e-9)
+        for changeArtifact in [true, false] {
+            var other = context; other.decisionID = UUID()
+            if changeArtifact { other.profile.artifactSHA256 = "different-artifact" }
+            else { other.profile.promptVersion = "different-prompt" }
+            let isolated = try await selected(reopened, other)
+            XCTAssertTrue(isolated.utilities.values.allSatisfy { $0 == 0 })
+        }
+        try await reopened.applyFeedback(FeedbackEvent(decisionID: context.decisionID, verdict: .notTried, revision: 2))
+        var corrected = context; corrected.decisionID = UUID()
+        let noReward = try await selected(reopened, corrected)
+        XCTAssertTrue(noReward.utilities.values.allSatisfy { $0 == 0 })
+    }
+
     func testDeliveryValidationIdempotencyAndFeedbackNoOps() async throws {
         let engine = try CoachEngine(storeURL: tempURL()), c = makeContext()
         let d = try await selected(engine, c, excluding: nil)

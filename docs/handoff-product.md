@@ -70,3 +70,32 @@ cue as pending before invoking speech.
 Verified on the integrated working tree: 15 Core tests, 15 device/pipeline tests,
 and the unsigned generic-iOS Voca build passed. No hardware playback or
 interruption test was performed for this merge.
+
+## Machine 1 local continuation through 14:00
+
+User authorized running this lane on Machine 1. Existing contracts, policy,
+content and audit validator are integrated; no API or resource migration is
+needed. This continuation adds two regression tests, with no production changes:
+
+- Failed persistence rolls feedback back in memory, preserves the last store,
+  and permits a successful retry that survives relaunch.
+- Duplicate feedback trains once; artifact SHA and prompt version isolate
+  policies; correcting feedback to not-tried removes the prior reward.
+
+Verified locally: **17 Core tests pass** using
+`CLANG_MODULE_CACHE_PATH=/tmp/voca-module-cache swift test --disable-sandbox --package-path Packages/VocaCore`.
+The cache override avoids the agent filesystem restriction on the default Clang
+cache. The existing suite also verifies audit evidence, simulated content,
+revision/replay/relaunch, delayed model feedback and interrupted delivery.
+No Core defect was found by these added regressions. These tests and checkpoint
+notes are included in the Machine 1 integration branch; no cherry-pick is required
+on this machine.
+
+Scope stops at the Machine 2 column through 14:00. App memory/dialogue integration,
+audit generation/UI, spoken practice, hardware interruption and E2B validation
+remain device-lane work. Book-source pages were not re-audited in this continuation.
+
+Integration check: all **15 device/pipeline host tests pass** with `swift test`
+outside the agent sandbox. The sandboxed run could not initialize Apple Opus
+(`unsupported`); the same native decoder test passed outside it.
+`git diff --check` passed. No new app build or hardware test was run.

@@ -280,3 +280,25 @@ ready Machine 2 commit. The public Pipecat iOS reference's required modified
 Apple adapters are absent from official Pipecat main, so runtime packaging
 remains blocked on implementing or obtaining that mobile dependency split.
 See `docs/handoff-device.md` and `docs/dependencies.md` for exact scope and checks.
+
+## Machine 1 takeover of Machine 2 through 14:00 — 14 November 2026
+
+At the user's request, Machine 1 now performs the Core/content lane locally
+through the 14:00 checkpoint. The canonical package remains `Packages/VocaCore`;
+no duplicate contracts or separate runtime are introduced. Existing Machine 2
+implementation is already merged. Future Core changes should use this checkout
+as the integration baseline to avoid overlapping work.
+
+| Machine 2 checkpoint | Local status |
+| --- | --- |
+| 09:00–10:00 contracts, package, fixtures | Integrated; canonical model/voice/content contracts and labelled fixtures tested. |
+| 10:00–11:00 policy, persistence, attribution | Integrated; masks, signed numeric updates, delivery gating and attribution tested. |
+| 11:00–12:00 coaching/scenario data | Nine cards and three simulated scenarios integrated; decoding and references tested. |
+| 12:00–13:00 revision/replay/relaunch | Verified locally, including delayed feedback, corrections, duplicate feedback and failed-write rollback/retry. |
+| 13:00–14:00 evidence review and Core fixes | Audit source validation and terminal-delivery regression covered; artifact/prompt namespace isolation checked. 17 Core tests pass. |
+
+These are Core/content and host-fixture results. The shared 14:00 checkpoint
+still requires Machine 1's audit/practice UI and orchestration, real interruption
+checks, and E2B device switching. It is not a claim that the whole 14:00 product
+milestone is complete. The older device-setup checkpoint above is historical;
+current hardware results and limitations are in `docs/handoff-device.md`.
