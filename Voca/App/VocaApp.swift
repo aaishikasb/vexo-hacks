@@ -179,7 +179,9 @@ struct SetupView: View {
                     if pipecat.ready { break }
                     try? await Task.sleep(for: .milliseconds(200))
                 }
-                await models.checkSceneOnDevice(camera: camera, pipecatReady: pipecat.ready)
+                let checkModel = ProcessInfo.processInfo.arguments.contains("--e2b") ? "gemma4E2B" : "gemma4E4B"
+                selectedModel = checkModel
+                await models.checkSceneOnDevice(camera: camera, pipecatReady: pipecat.ready, modelID: checkModel)
                 UIApplication.shared.isIdleTimerDisabled = false
                 checkingModel = false
             }

@@ -333,3 +333,37 @@ Reproducible checker: compile canonical Core sources plus
 It asserts episode equality and positive utility change, creates only temporary
 probe stores, and removes those stores on completion. Private exports were
 removed after verification; no personal scene/cue text was added to Git.
+
+### Complete-response execution and verified E2B fallback
+
+Switched the native adapter from stream callbacks to `Conversation.sendMessage`:
+Voca needs a whole validated result, and this API returns after the native call
+rather than a terminal stream callback that precedes callback-state release.
+The callback overlap was a suspected cause, not proven as the sole SDK defect.
+Cancellation still calls native cancel; the executor awaits request return before
+reuse/reload. Native failures still release the engine and require explicit reload.
+
+E2B was staged but not imported. Imported it on the physical phone and verified
+SHA-256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`.
+Load now imports an official staged selected artifact through the existing hash
+check if needed. Load errors have their own DEBUG diagnostic; checksum and
+missing-artifact errors have distinct recovery text.
+
+E2B initially echoed JSON schema keys instead of scene facts. Put schema metadata
+before task instructions and explicitly request an instance with actual values.
+Profile prompt version is `voca-v2.6-complete-json-instance`. Strict decoding,
+field/type/source/length validation remain; decoding errors now become readable
+validation failures. A regression test rejects wrong scene and cue field types.
+
+Final physical checks, Pipecat loaded and one model engine at a time:
+- E4B: repeated image/text plus 10 full cue pipelines, 10 validated/0 rejected,
+  no native failure; first scene 3.74299 seconds.
+- E2B: same sequence, 10 validated/0 rejected, no native failure; first scene
+  1.51957 seconds. Both pipelines include an Explain case with explicit knownPoint.
+- Signed iPhone build passes; 16 host device fixtures pass.
+
+These bounded runs support the fix but do not prove sustained/thermal reliability.
+No speech playback or reward is fabricated by the harness. E2B glasses playback,
+physical cancellation with the new complete-response path, and switching under
+active load remain separate checks. Existing personal feedback stays in its old
+profile namespace. Concurrent Machine 2 Core/test/doc changes were preserved.

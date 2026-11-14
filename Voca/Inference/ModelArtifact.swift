@@ -7,7 +7,12 @@ nonisolated struct ModelArtifact: Codable, Sendable, Equatable {
     let filename: String
     enum Failure: LocalizedError {
         case invalid, checksum
-        var errorDescription: String? { "Choose a generic Gemma 4 E4B or E2B .litertlm artifact and verify its SHA-256." }
+        var errorDescription: String? {
+            switch self {
+            case .invalid: "Import the selected generic Gemma 4 .litertlm file before loading it."
+            case .checksum: "The model file does not match its expected SHA-256. Download the official artifact again."
+            }
+        }
     }
     static var directory: URL {
         URL.applicationSupportDirectory.appending(path: "Voca/Models", directoryHint: .isDirectory)

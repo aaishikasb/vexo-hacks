@@ -39,18 +39,35 @@ import VocaCore
         artifacts = next
         status = "Model imported and SHA-256 verified."
     }
-        func load(modelID: String) async throws {
-        guard let artifact = artifacts.first(where: { $0.modelID == modelID }) else { throw ModelArtifact.Failure.invalid }
-        status = "Loading model…"
-        do { try await executor.load(artifact); status = "Model loaded. A device inference check is still required." }
-        catch { status = "Model failed to load. Select another imported model to recover."; throw error }
+    func load(modelID: String) async throws {
+        do {
+            if !artifacts.contains(where: { $0.modelID == modelID }),
+               let entry = Self.catalog.first(where: { $0.modelID == modelID }),
+               FileManager.default.fileExists(atPath: URL.documentsDirectory.appending(path: entry.filename).path) {
+                try await importStaged(modelID: modelID)
+            }
+            guard let artifact = artifacts.first(where: { $0.modelID == modelID }) else { throw ModelArtifact.Failure.invalid }
+            status = "Loading model…"
+            try await executor.load(artifact)
+            status = "\(modelID == "gemma4E2B" ? "E2B fallback" : "E4B") loaded."
+        } catch {
+            status = "Model failed to load: " + error.localizedDescription
+#if DEBUG
+            let diagnostic = ["modelID": modelID, "stage": "load", "error": error.localizedDescription,
+                              "recordedAt": ISO8601DateFormatter().string(from: Date())]
+            if let data = try? JSONSerialization.data(withJSONObject: diagnostic) {
+                try? data.write(to: URL.documentsDirectory.appending(path: "model-load-failure.json"), options: .atomic)
+            }
+#endif
+            throw error
+        }
     }
     }
 
 #if DEBUG
 extension ModelLibrary {
-    func checkSceneOnDevice(camera: GlassesCamera, pipecatReady: Bool) async {
-        var result: [String: Any] = ["passed": false, "stage": "loading", "visionBackend": "metal", "pipecatReady": pipecatReady]
+    func checkSceneOnDevice(camera: GlassesCamera, pipecatReady: Bool, modelID: String) async {
+        var result: [String: Any] = ["passed": false, "stage": "loading", "visionBackend": "metal", "pipecatReady": pipecatReady, "modelID": modelID]
         func report() {
             if let data = try? JSONSerialization.data(withJSONObject: result) {
                 try? data.write(to: URL.documentsDirectory.appending(path: "scene-check.json"), options: .atomic)
@@ -60,7 +77,8 @@ extension ModelLibrary {
         defer { camera.stop() }
         do {
             try camera.configure()
-            try await load(modelID: "gemma4E4B")
+            if !artifacts.contains(where: { $0.modelID == modelID }) { try await importStaged(modelID: modelID) }
+            try await load(modelID: modelID)
             result["stage"] = "camera"; report()
             try await camera.start()
             for _ in 0..<100 {
@@ -77,6 +95,20 @@ extension ModelLibrary {
             let began = Date()
             let response = try await executor.generate(request)
             try response.validate(for: request)
+            let trimmed = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            result["sceneResponseBytes"] = response.text.utf8.count
+            result["sceneJSONFence"] = trimmed.hasPrefix("```json") && trimmed.hasSuffix("```")
+            result["sceneObjectEnvelope"] = trimmed.hasPrefix("{") && trimmed.hasSuffix("}")
+            if let data = trimmed.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                result["sceneKeys"] = object.keys.sorted()
+                result["settingAllowed"] = ["cafe", "shop", "event", "other"].contains(object["setting"] as? String ?? "")
+                if let observations = object["observations"] as? [String] {
+                    result["rawObservationCount"] = observations.count
+                    result["maxObservationLength"] = observations.map(\.count).max() ?? 0
+                }
+            }
+            report()
             let scene = try GeneratedFields.scene(response.text)
             result["seconds"] = Date().timeIntervalSince(began)
             result["observationCount"] = scene.observations.count
@@ -95,14 +127,25 @@ extension ModelLibrary {
             let checkStore = URL.temporaryDirectory.appending(path: "cue-check-" + UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: checkStore) }
             let coach = try CoachEngine(storeURL: checkStore)
-            for index in 0..<3 {
+            var validatedCues = 0
+            var rejectedCues = 0
+            for index in 0..<10 {
                 result["stage"] = "fullCuePipeline\(index)"; report()
-                let cue = try await CuePipeline(model: executor, coach: coach).prepare(photo: jpeg,
-                    observedAt: Date(), requestedAt: Date(), goal: index == 1 ? .explain : .enter,
-                    knownPoint: index == 1 ? "I am building a local conversation companion." : nil)
-                result["cueWordCount"] = cue.text.split(whereSeparator: \.isWhitespace).count
+                do {
+                    let cue = try await CuePipeline(model: executor, coach: coach).prepare(photo: jpeg,
+                        observedAt: Date(), requestedAt: Date(), goal: index == 1 ? .explain : .enter,
+                        knownPoint: index == 1 ? "I am building a local conversation companion." : nil)
+                    result["cueWordCount"] = cue.text.split(whereSeparator: \.isWhitespace).count
+                    validatedCues += 1
+                } catch is GeneratedFields.Failure {
+                    rejectedCues += 1
+                }
+                result["validatedCues"] = validatedCues
+                result["rejectedCues"] = rejectedCues
+                report()
             }
-            result["passed"] = true; result["stage"] = "completed"
+            result["nativeSequencePassed"] = true
+            result["passed"] = rejectedCues == 0; result["stage"] = "completed"
         } catch { result["error"] = error.localizedDescription }
         report()
     }

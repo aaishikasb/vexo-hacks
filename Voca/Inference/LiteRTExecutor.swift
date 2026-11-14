@@ -52,7 +52,7 @@ actor LiteRTExecutor: ModelGenerating {
         try await newEngine.initialize()
         try Task.checkCancellation()
         engine = newEngine
-        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.4-metal-context2048-vision280")
+        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.6-complete-json-instance")
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         try Task.checkCancellation()
@@ -113,19 +113,19 @@ actor LiteRTExecutor: ModelGenerating {
         self.conversation = conversation
         guard !cancelled.contains(request.requestID) else { throw CancellationError() }
         // shortcut: Native constrained decoding aborts in llguidance allocation on device; recheck after an SDK fix.
-        let prompt = request.prompt + (request.responseSchemaJSON.map { "\nReturn only JSON matching this schema, without markdown: " + $0 } ?? "")
+        let prompt = (request.responseSchemaJSON.map {
+            "Output schema metadata (do not repeat this schema): " + $0 + "\n\n"
+        } ?? "") + request.prompt + (request.responseSchemaJSON == nil ? "" :
+            "\nReturn only the answer object with actual values, not the schema, without markdown.")
         var contents: [Content] = [.text(prompt)]
         if let image = request.imageJPEG { contents.append(.imageData(image)) }
-        var text = ""
-        var outputExceeded = false
-        // Drain the native stream even after cancellation; never reuse its engine early.
-        for try await chunk in conversation.sendMessageStream(Message(contents: contents), maxOutputTokens: request.maxOutputTokens, thinkingConfig: ThinkingConfig(enableThinking: false), responseFormat: nil) {
-            if cancelled.contains(request.requestID) || outputExceeded { continue }
-            text += chunk.toString
-            if text.utf8.count > 12_000 { outputExceeded = true; try conversation.cancel() }
-        }
-        guard !outputExceeded else { throw Failure.outputLimit }
+        // Complete-response API returns after native execution, avoiding stream-terminal callback overlap.
+        let response = try await conversation.sendMessage(Message(contents: contents),
+            maxOutputTokens: request.maxOutputTokens,
+            thinkingConfig: ThinkingConfig(enableThinking: false), responseFormat: nil)
         guard !cancelled.contains(request.requestID) else { throw CancellationError() }
+        let text = response.toString
+        guard text.utf8.count <= 12_000 else { throw Failure.outputLimit }
         return ModelResponse(requestID: request.requestID, actualProfile: profile, text: text)
     }
     func cancel(requestID: UUID) {

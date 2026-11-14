@@ -1,7 +1,16 @@
 import Foundation
 
 nonisolated enum GeneratedFields {
-    enum Failure: Error { case malformed, fields, length, evidence }
+    enum Failure: LocalizedError, Equatable {
+        case malformed, fields, length, evidence
+        var errorDescription: String? {
+            switch self {
+            case .malformed, .fields: "The model returned an invalid response format. Nothing was spoken; request a new cue."
+            case .length: "The cue did not meet the short, safe-text requirements. Nothing was spoken; request a new cue."
+            case .evidence: "The cue cited unsupported evidence. Nothing was spoken; request a new cue."
+            }
+        }
+    }
     struct Cue: Decodable, Sendable { let text: String; let sourceIDs: [String] }
     struct Scene: Decodable, Sendable { let setting: String; let observations: [String]; let uncertain: Bool }
     struct Audit: Decodable, Sendable { let strength: String; let opportunity: String; let exercise: String; let sourceIDs: [String]; let principleID: String }
@@ -10,7 +19,8 @@ nonisolated enum GeneratedFields {
         guard text.utf8.count <= 12_000, let data = text.data(using: .utf8),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(object.keys) == keys else { throw Failure.fields }
-        return try JSONDecoder().decode(type, from: data)
+        do { return try JSONDecoder().decode(type, from: data) }
+        catch { throw Failure.fields }
     }
     static func cue(_ text: String, allowedSources: Set<String>) throws -> Cue {
         let cue = try decode(Cue.self, text: text, keys: ["text", "sourceIDs"])

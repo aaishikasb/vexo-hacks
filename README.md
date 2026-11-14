@@ -108,10 +108,12 @@ The pinned Pipecat reference includes its modified mobile fork. The app now
 bundles its Python runtime and a custom speech-only FrameProcessor adapter;
 Swift acknowledges full native playback before Pipecat reports completion.
 Host checks: `PYTHONPATH=Voca/Voice/Python:.build/pipecat-ios/pipecat/src .build/pipecat-ios/.venv/bin/python -m unittest discover -s Tests/VoiceTests`.
-On-device checks have produced validated Gemma scene facts and cues with Pipecat
-loaded. Interactive delivery still has intermittent native allocation failures;
-the current mitigation caps context at 2,048 and visual tokens at 280 and releases
-the engine after native errors. Reload E4B or explicitly select E2B to recover.
+The complete-response LiteRT adapter passed ten repeated photo/cue pipelines each
+with E4B and E2B on the phone while Pipecat was loaded, with all cues validated.
+Context is capped at 2,048 and visual tokens at 280. Native errors release the
+engine; reload E4B or explicitly select E2B to recover. Loading a staged official
+artifact imports it with SHA-256 verification automatically. These bounded runs
+do not establish long-duration or thermal reliability.
 Feedback learning and audits/practice are not yet demonstrated end to end.
 See the handoff for exact physical-device results.
 No five-second latency, thermal, memory, locked-phone, route-loss, or long-term
