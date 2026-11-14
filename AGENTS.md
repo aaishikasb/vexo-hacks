@@ -54,3 +54,14 @@ swift test --package-path Packages/VocaCore
 Record the actual app scheme and build commands in README once configured. Test nontrivial policy, persistence, and decoding behavior. Use fixtures on the product Mac; verify camera, audio routing, model execution, and lifecycle behavior on the physical phone.
 
 Label fixture, Simulator, and real-device results accurately. Verify band tap delivery, local transcription, and locked-phone inference on the assigned hardware. Report remaining blockers plainly, with a working recovery path where available.
+
+## Device-lane checkout commands
+
+Open `Voca.xcodeproj` / scheme `Voca`; the root `Package.swift` is the separate
+Mac `VocaDeviceChecks` fixture target, not the app. Use `swift test` for these
+checks and the existing Core command for Machine 2's package. Build commands,
+signing setup, and current limitations are in `README.md`. Run
+`python3 scripts/generate_project.py` after adding app files; it preserves a team
+chosen in Xcode into ignored `.local/Signing.xcconfig`. Do not commit signing
+credentials or provisioning profiles. SDK pins and the Pipecat mobile-source
+blocker are recorded in `docs/dependencies.md`.

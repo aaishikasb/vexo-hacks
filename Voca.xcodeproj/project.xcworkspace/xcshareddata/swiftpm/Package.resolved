@@ -1,0 +1,24 @@
+{
+  "originHash" : "a9adf65fb2ebb67ed11991a1468c004da5a154b669e55a85fdc9b4d228212776",
+  "pins" : [
+    {
+      "identity" : "litert-lm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google-ai-edge/LiteRT-LM",
+      "state" : {
+        "revision" : "7a03724cece417f1724c923b3d527b4319730841",
+        "version" : "0.19.1"
+      }
+    },
+    {
+      "identity" : "meta-wearables-dat-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/facebook/meta-wearables-dat-ios",
+      "state" : {
+        "revision" : "0bd369298eef6a980ad0bdb6c8a5502f2c02a08c",
+        "version" : "1.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}

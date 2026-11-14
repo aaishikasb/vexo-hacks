@@ -268,3 +268,15 @@ Account for 09:30 kickoff and 12:30 lunch. Exchange ready SHAs and checks at che
 - [Pipecat iOS reference](https://github.com/pipecat-ai/pipecat-build-ios) and [embedded architecture](https://github.com/pipecat-ai/pipecat-build-ios/blob/main/docs/architecture.md)
 
 Use current official SDK documentation for integration details. The kit’s Deepgram examples are cloud transcription; our selected on-device transcription path needs separate verification. Test taps and locked-phone behavior on hardware.
+
+## Actual device checkpoint — 14 November 2026
+
+The app setup build now compiles with pinned Meta DAT iOS 1.0.1 and LiteRT-LM
+0.19.1. A development-signed app was installed and launched on the paired
+physical iPhone 18 Pro Max (iOS 27.2, Developer Mode enabled). Seven Mac fixture
+tests pass; no wearable capture, model execution, Pipecat launch, learning,
+latency, or locked-phone result is claimed. Core/content is still awaiting a
+ready Machine 2 commit. The public Pipecat iOS reference's required modified
+Apple adapters are absent from official Pipecat main, so runtime packaging
+remains blocked on implementing or obtaining that mobile dependency split.
+See `docs/handoff-device.md` and `docs/dependencies.md` for exact scope and checks.
