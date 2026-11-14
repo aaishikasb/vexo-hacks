@@ -40,6 +40,8 @@ public actor CoachEngine {
     }
 
     public func selectCue(_ context: CueContext, explore: Bool, excluding: Strategy? = nil) throws -> CueDecision? {
+        let suppliedEvidenceIDs = Set(context.snapshot.approvedMemories.map(\.sourceID) + context.snapshot.dialogue.map(\.sourceID))
+        guard suppliedEvidenceIDs.isDisjoint(with: store.invalidatedSourceIDs) else { throw CoachEngineError.invalidEvidenceReferences }
         let features = Self.features(for: context)
         let fresh = features[9] == 1
         let story = features[8] == 1
@@ -113,19 +115,22 @@ public actor CoachEngine {
         rebuild(key: PolicyKey(profile: episode.decision.context.profile, mode: episode.decision.context.mode))
     }
 
-    public func invalidateEvidence(sourceID: String) throws {
+    /// Permanently removes episodes derived from this evidence and rebuilds affected policies.
+    /// This also erases private transcript/memory text held in frozen episode snapshots.
+    public func deleteEvidence(sourceID: String) throws {
         let previousStore = store
         store.invalidatedSourceIDs.insert(sourceID)
-        for i in store.episodes.indices {
-            var e = store.episodes[i]
-            guard e.decision.context.snapshot.approvedMemories.contains(where: { $0.sourceID == sourceID }) || e.decision.context.snapshot.dialogue.contains(where: { $0.sourceID == sourceID }) else { continue }
-            e.feedback = nil
-            if e.cue?.sourceIDs.contains(sourceID) == true { e.cue = nil; if e.delivery == .completed { e.delivery = .failed } }
-            store.episodes[i] = e
+        store.episodes.removeAll { e in
+            e.decision.context.snapshot.approvedMemories.contains(where: { $0.sourceID == sourceID }) ||
+            e.decision.context.snapshot.dialogue.contains(where: { $0.sourceID == sourceID }) ||
+            e.cue?.sourceIDs.contains(sourceID) == true
         }
         do { try persist() } catch { store = previousStore; throw error }
         policies = Self.replayPolicies(store)
     }
+
+    /// Compatibility spelling for callers that treat deletion as policy invalidation.
+    public func invalidateEvidence(sourceID: String) throws { try deleteEvidence(sourceID: sourceID) }
 
     public func episodes() -> [Episode] { store.episodes }
 
