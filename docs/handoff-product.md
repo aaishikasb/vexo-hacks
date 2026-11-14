@@ -1,6 +1,6 @@
 # Machine 2 handoff — Core and coaching content
 
-Ready implementation commit: `05802b53bddfb8b5f9581059d9277d1d12160938`.
+Ready implementation commit: `6307adacb297c3ed261c6554cee56fb174fbe182`.
 
 ## Ready changes
 
@@ -27,7 +27,7 @@ public func invalidateEvidence(sourceID: String) throws // compatibility alias
 public static func features(for context: CueContext) -> [Double]
 ```
 
-Actor calls are `await`ed by app clients. Construct one engine from the durable local store URL. `recordDelivery` requires the generated cue for `.completed`; failed and cancelled deliveries may pass `cue: nil`. Repeating the same terminal status and cue is idempotent; a conflicting terminal event throws. Feedback must match a completed cue and the frozen profile. Feedback corrections require a strictly greater revision. Do not implement feature derivation in the app.
+Actor calls are `await`ed by app clients. Construct one engine from the durable local store URL. After cue validation and before handing it to speech, persist it with `recordDelivery(decisionID:cue:status: .pending)`. This keeps the actual cue/sources with the frozen decision if the app exits during playback. On relaunch, mark unresolved pending delivery cancelled; passing `cue: nil` preserves the stored cue and cannot earn feedback. `.completed` requires a valid cue (provided then or already pending). Repeating the same pending cue or terminal status is idempotent; conflicting cue/terminal events throw. Feedback must match a completed cue and the frozen profile. Feedback corrections require a strictly greater revision. Do not implement feature derivation in the app.
 
 `ModelResponse.validate(for:)` checks request ID, exact model profile, and nonempty output. `SpeechRequest`, `VoiceEvent`, `PracticeTurn`, and `VoiceCoordinating` are in `Contracts.swift`; Core intentionally has no audio, Pipecat, or hardware dependencies.
 
@@ -45,7 +45,7 @@ Run:
 swift test --package-path Packages/VocaCore
 ```
 
-**Verified:** `swift test --package-path Packages/VocaCore` passed: 12 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, Explain point source attribution, signed four-active-feature `+0.8` update, delayed E4B feedback after E2B selection, correction replay across relaunch, live/practice separation, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
+**Verified:** `swift test --package-path Packages/VocaCore` passed: 13 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, Explain point source attribution, pending cue persistence and cancellation recovery, signed four-active-feature `+0.8` update, delayed E4B feedback after E2B selection, correction replay across relaunch, live/practice separation, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
 
 ## Limitations
 
