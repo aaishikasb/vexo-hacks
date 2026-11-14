@@ -6,10 +6,11 @@ import VocaCore
 private actor FixtureModel: ModelGenerating {
     let coach: CoachEngine
     let fail: Bool
+    let photoOnly: Bool
     var sceneID: UUID?
     var sawPersistedDecision = false
     let profile = ModelProfile(modelID: .gemma4E4B, artifactSHA256: "fixture", promptVersion: "fixture")
-    init(coach: CoachEngine, fail: Bool = false) { self.coach = coach; self.fail = fail }
+    init(coach: CoachEngine, fail: Bool = false, photoOnly: Bool = false) { self.coach = coach; self.fail = fail; self.photoOnly = photoOnly }
     func activeProfile() -> ModelProfile { profile }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         if request.kind == .scene {
@@ -18,9 +19,33 @@ private actor FixtureModel: ModelGenerating {
                 text: #"{"setting":"cafe","observations":["A coffee menu is visible"],"uncertain":false}"#)
         }
         sawPersistedDecision = await coach.episodes().contains { $0.id == request.decisionID && $0.delivery == .pending }
-        let source = fail ? "invented" : sceneID!.uuidString
+        let context = await coach.episodes().first { $0.id == request.decisionID }?.decision.context
+        let source = fail ? "invented" : (photoOnly ? nil : context?.knownPointSourceID) ?? sceneID!.uuidString
+        if let pointSource = context?.knownPointSourceID { #expect(request.prompt.contains(pointSource)) }
         return ModelResponse(requestID: request.requestID, actualProfile: profile,
             text: "{\"text\":\"Ask which drink on the menu they would recommend today.\",\"sourceIDs\":[\"\(source)\"]}")
+    }
+}
+
+@Test(arguments: [false, true]) func explainCitesTypedPointBeforeSpeech(photoOnly: Bool) async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+    let model = FixtureModel(coach: coach, photoOnly: photoOnly)
+    let pipeline = CuePipeline(model: model, coach: coach)
+    if photoOnly {
+        await #expect(throws: GeneratedFields.Failure.self) {
+            try await pipeline.prepare(photo: Data([1]), observedAt: Date(), requestedAt: Date(), goal: .explain, knownPoint: "My garden project")
+        }
+        #expect(await coach.episodes().first?.delivery == .failed)
+    } else {
+        let cue = try await pipeline.prepare(photo: Data([1]), observedAt: Date(), requestedAt: Date(), goal: .explain, knownPoint: "My garden project")
+        let episode = try #require(await coach.episodes().first)
+        let source = try #require(episode.decision.context.knownPointSourceID)
+        #expect(source == "user-input:\(episode.id.uuidString)")
+        #expect(cue.sourceIDs == [source])
+        #expect(episode.delivery == .pending)
+        try await coach.recordDelivery(decisionID: cue.decisionID, cue: cue, status: .completed)
     }
 }
 

@@ -252,3 +252,31 @@ returned passed=true after start/stop with no PCM or microphone capture. This
 proves the callback path and on-device recognizer availability check, not actual
 band transcription. Updated checks: 10 Core tests and 14 app/band fixtures pass;
 signed integrated iPhone build passes.
+
+### Photo inference crash diagnosis
+
+Physical-device CPU vision failed with `Failed to allocate tensors`. Metal
+vision with native constrained JSON then aborted in Rust `rust_oom` through
+`llguidance` tokenizer creation (Voca crash report 12:23:01). Disabled native
+response constraints, supplied the schema in the prompt, and retained strict
+Swift JSON, semantic, source-ID, and profile validation before delivery.
+Profile prompt version is now `voca-v2.2-metal-prompt-json`.
+
+The signed recovery build installed successfully. Real-camera `--scene-check`
+passed: 299,959-byte JPEG, five validated observations, 3.7541 seconds for scene
+generation with E4B and Metal vision. App fixtures: 14 passed. This is scene-only
+inference; complete photo-to-cue-to-glasses delivery remains pending user test.
+
+### Explain source attribution and delayed-feedback checkpoint
+
+Integrated Machine 2 through `8b190b2` (implementation/test commit `05802b5`)
+with merge `2fc0023`. `CuePipeline` now assigns `user-input:<decision UUID>` to
+nonempty wearer-entered points, supplies `knownPointSourceID` to Core, prompts
+for the appropriate citation, and rejects Explain cues missing that citation
+before speech. Photo-only citations cannot stand in for typed input.
+
+Verified: 12 Core tests, including delayed E4B feedback after E2B selection and
+corrected replay after relaunch; 15 device/pipeline tests, including two Explain
+citation cases; unsigned generic-iOS Voca build succeeded. Device runtime and
+spoken Explain behavior were not exercised in this checkpoint. Concurrent
+local inference/diagnostic edits remain uncommitted.
