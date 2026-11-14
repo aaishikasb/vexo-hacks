@@ -61,6 +61,28 @@ final class VocaCoreTests: XCTestCase {
         do { try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .completed); XCTFail("unapproved memory source accepted") } catch CoachEngineError.invalidEvidenceReferences {}
     }
 
+    func testExplainCueMustCiteWearerProvidedKnownPoint() async throws {
+        let engine = try CoachEngine(storeURL: tempURL())
+        var missingCitation = makeContext(.live, goal: .explain, dialogue: false, story: false)
+        missingCitation.knownPointSourceID = nil
+        let none = try await engine.selectCue(missingCitation, explore: false, excluding: nil)
+        XCTAssertNil(none)
+
+        var context = missingCitation
+        context.decisionID = UUID()
+        context.knownPointSourceID = "known-point:\(context.decisionID.uuidString)"
+        let decision = try await selected(engine, context)
+        XCTAssertEqual(decision.selectedAction, .explainClearly)
+        let photoOnly = CueResult(decisionID: decision.context.decisionID, actualProfile: context.profile,
+            strategy: .explainClearly, text: "Explain the point you entered clearly.", sourceIDs: [context.scene.requestID.uuidString])
+        do { try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: photoOnly, status: .completed); XCTFail("photo was accepted as source for wearer input") } catch CoachEngineError.invalidEvidenceReferences {}
+        let attributed = CueResult(decisionID: decision.context.decisionID, actualProfile: context.profile,
+            strategy: .explainClearly, text: "Explain the point you entered clearly.", sourceIDs: [context.knownPointSourceID!])
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: attributed, status: .completed)
+        let episodes = await engine.episodes()
+        XCTAssertEqual(episodes.first?.cue?.sourceIDs, [context.knownPointSourceID!])
+    }
+
     func testSignedUpdateNumericFeedbackReplayAndProfileSeparation() async throws {
         let url = tempURL(), profile = VocaFixtures.profile()
         let engine = try CoachEngine(storeURL: url)
@@ -92,6 +114,35 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(corrected.utilities[d.selectedAction.rawValue]!, -0.8, accuracy: 1e-9)
         // Original E4B feedback still trains its frozen namespace after E2B selection.
         XCTAssertEqual(corrected.context.profile, profile)
+    }
+
+    func testDelayedE4BFeedbackWhileE2BActiveAndCorrectedReplaySurvivesRelaunch() async throws {
+        let url = tempURL(), e4b = VocaFixtures.profile(.gemma4E4B), e2b = VocaFixtures.profile(.gemma4E2B)
+        let engine = try CoachEngine(storeURL: url)
+        var originalContext = makeContext(.live, goal: .deepen, profile: e4b, dialogue: true, story: false)
+        originalContext.knownPoint = nil
+        let original = try await completedDecision(engine, context: originalContext)
+
+        var e2bContext = originalContext; e2bContext.decisionID = UUID(); e2bContext.profile = e2b
+        let activeE2B = try await selected(engine, e2bContext)
+        try await engine.applyFeedback(FeedbackEvent(decisionID: original.context.decisionID, verdict: .helpful, revision: 1))
+
+        var verifyE4B = originalContext; verifyE4B.decisionID = UUID()
+        let e4bAfterDelayedFeedback = try await selected(engine, verifyE4B)
+        XCTAssertEqual(e4bAfterDelayedFeedback.utilities[original.selectedAction.rawValue]!, 0.8, accuracy: 1e-9)
+        var verifyE2B = e2bContext; verifyE2B.decisionID = UUID()
+        let e2bUnaffected = try await selected(engine, verifyE2B)
+        XCTAssertEqual(e2bUnaffected.utilities[original.selectedAction.rawValue], 0)
+        XCTAssertEqual(activeE2B.context.profile, e2b)
+
+        try await engine.applyFeedback(FeedbackEvent(decisionID: original.context.decisionID, verdict: .unhelpful, revision: 2))
+        let reopened = try CoachEngine(storeURL: url)
+        var relaunchE4B = originalContext; relaunchE4B.decisionID = UUID()
+        let correctedE4B = try await selected(reopened, relaunchE4B)
+        XCTAssertEqual(correctedE4B.utilities[original.selectedAction.rawValue]!, -0.8, accuracy: 1e-9)
+        var relaunchE2B = e2bContext; relaunchE2B.decisionID = UUID()
+        let correctedE2B = try await selected(reopened, relaunchE2B)
+        XCTAssertEqual(correctedE2B.utilities[original.selectedAction.rawValue], 0)
     }
 
     func testDeliveryValidationIdempotencyAndFeedbackNoOps() async throws {

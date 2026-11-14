@@ -1,6 +1,6 @@
 # Machine 2 handoff — Core and coaching content
 
-Ready implementation commit: `a0643034e9636f92ecb0b4d5b6fe85f861b03a04`.
+Ready implementation commit: `05802b53bddfb8b5f9581059d9277d1d12160938`.
 
 ## Ready changes
 
@@ -10,6 +10,7 @@ Ready implementation commit: `a0643034e9636f92ecb0b4d5b6fe85f861b03a04`.
 - Labelled synthetic fixtures in `VocaFixtures` cover unknown speaker, stale/gapped dialogue, duplicate tap IDs, and interrupted delivery.
 - Nine original coaching cards cover all nine requested books, and three simulated practice scenarios are in the owned `Resources/` directories. The source links point to public author, publisher, or book listing pages. `CoachingContent.decode(cards:scenarios:)` checks unique IDs, HTTPS source links, and scenario principle references.
 - Cue source validation accepts only share-approved memory IDs, available dialogue IDs, and the scene request ID. Fresh dialogue can be any nonempty attributed speaker; missing/unknown/undiarized speakers and missing timestamps are excluded. Repeated decision UUIDs are rejected before selection is persisted.
+- Explain cues require a separate `knownPointSourceID` for wearer-entered `knownPoint`; Core makes `.explainClearly` ineligible without it and rejects completed cues that cite only the scene. This keeps typed wearer context from being attributed to the photo.
 
 ## Public integration signatures
 
@@ -30,6 +31,10 @@ Actor calls are `await`ed by app clients. Construct one engine from the durable 
 
 `ModelResponse.validate(for:)` checks request ID, exact model profile, and nonempty output. `SpeechRequest`, `VoiceEvent`, `PracticeTurn`, and `VoiceCoordinating` are in `Contracts.swift`; Core intentionally has no audio, Pipecat, or hardware dependencies.
 
+### Machine 1 migration for Explain cues
+
+When constructing an Explain `CueContext`, assign a unique source ID to the wearer's typed point, for example `user-input:<decision UUID>`, and set `knownPointSourceID`. Include that ID in the generated cue's allowed source IDs and ask the model to cite it when using `knownPoint`. `recordDelivery` then verifies the cue contains the same citation. Without a point and source ID, Core returns no decision for Explain; do not fall back to citing the scene.
+
 Bundle the JSON resources from `Resources/CoachingCards/coaching-cards.json` and `Resources/PracticeScenarios/practice-scenarios.json`. Practice partner instructions explicitly label the partner as simulated; scenario output must not be added to personal memory or real-person evidence.
 
 ## Verification
@@ -40,7 +45,7 @@ Run:
 swift test --package-path Packages/VocaCore
 ```
 
-**Verified:** `swift test --package-path Packages/VocaCore` passed: 10 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, signed four-active-feature `+0.8` update, correction/replay, E4B/E2B and live/practice separation, persistence/relaunch, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
+**Verified:** `swift test --package-path Packages/VocaCore` passed: 12 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, Explain point source attribution, signed four-active-feature `+0.8` update, delayed E4B feedback after E2B selection, correction replay across relaunch, live/practice separation, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
 
 ## Limitations
 
