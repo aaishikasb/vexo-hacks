@@ -34,6 +34,7 @@ struct SetupView: View {
     @State private var expectedSHA256 = ""
     @State private var importingModel = false
     @State private var audio = NativeAudio()
+    @State private var pipecat = PipecatSpeech()
     @State private var listening = BandListening()
     @State private var showCaptureConsent = false
     @State private var bandNumber = ""
@@ -65,7 +66,12 @@ struct SetupView: View {
                             do { try audio.confirmGlassesRoute() } catch { operation.error = error.localizedDescription }
                         }
                         Button("Speak native test phrase") { run { try await audio.speak("Voca is ready to help you find your own words.") } }
-                        Button("Stop speech") { audio.stop() }
+                        Button("Stop speech") { pipecat.stop(); audio.stop() }
+                        Text(pipecat.status)
+                        Button("Start embedded Pipecat") { pipecat.start(audio: audio) }
+                        Button("Speak test phrase through Pipecat") {
+                            run { try await pipecat.speak("Voca is ready to help you find your own words.") }
+                        }.disabled(!pipecat.ready)
                         Text("Native audio test only. This does not verify Pipecat or record a coaching delivery.").font(.footnote).foregroundStyle(.secondary)
                     }
                     Section("Assigned band") {
@@ -122,6 +128,22 @@ struct SetupView: View {
                     .navigationTitle("Memory")
             }.tabItem { Label("Memory", systemImage: "person.text.rectangle") }
         }
+        .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--pipecat-check") {
+                pipecat.start(audio: audio)
+                for _ in 0..<100 {
+                    if pipecat.ready { break }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                let result: [String: Any] = ["ready": pipecat.ready, "status": pipecat.status]
+                try? FileManager.default.createDirectory(at: URL.documentsDirectory, withIntermediateDirectories: true)
+                if let data = try? JSONSerialization.data(withJSONObject: result) {
+                    try? data.write(to: URL.documentsDirectory.appending(path: "pipecat-check.json"), options: .atomic)
+                }
+            }
+            #endif
+        }
         .fileImporter(isPresented: $importingModel, allowedContentTypes: [.data]) { result in
             switch result {
             case .success(let url):
@@ -136,7 +158,7 @@ struct SetupView: View {
             Button("Cancel", role: .cancel) {}
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { camera.suspendForBackground(); audio.deactivate(); Task { await listening.stop(band: band) } }
+            if phase == .background { camera.suspendForBackground(); pipecat.stop(); audio.deactivate(); Task { await listening.stop(band: band) } }
         }
     }
     private func run(cameraTimeout: Bool = false, _ action: @escaping @MainActor () async throws -> Void) {

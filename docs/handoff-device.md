@@ -54,11 +54,13 @@ A following documentation-only commit records this SHA.
 - Physical iPhone 18 Pro Max, iOS 27.2: wired, paired, Developer Mode enabled.
 - User selected Personal Team and trusted its developer profile. A signed app
   was installed and successfully launched through devicectl.
-- Camera capture/Meta compatibility: user granted Always Allow, but startup remained in Working without a photo. Recovery build installed: checks existing permission, retains the selector, reports registration/compatibility/session state, and bounds UI wait to 25 seconds and stream startup to 15 seconds. Awaiting retest; camera checkpoint has NOT passed.
-- No assigned band number or scan authorization was provided; **no agent band
-  scan/connection/capture was performed**.
+- Camera capture passed: real JPEG received over documented Bluetooth Classic.
+- User confirmed hearing the full native test phrase through the glasses.
+- Embedded Pipecat startup passed on the phone; audible Pipecat phrase pending.
+- Assigned band is 18; user is unsure which client owns its reported connection.
+  No agent band scan/connection/capture was performed.
 - No measured Gemma cold/warm latency, memory, thermal, locked-phone behavior,
-  glasses playback, or combined Pipecat/Gemma runtime result exists yet.
+  or combined Pipecat/Gemma runtime result exists yet.
 
 ## Machine 2 integration
 
@@ -81,17 +83,15 @@ the product handoff. Do not implement hardware or voice dependencies in Core.
 1. Core/contracts/policy/store/content handoff absent. Approved memory store,
    full Session/Review/Memory flows, persisted decisions, eligible feedback,
    learning demonstration, audit, practice, and provenance integration remain.
-2. Pipecat iOS reference requires modified Apple bridge modules that are not in
-   the official main checkout. User has no copy. See `dependencies.md` for
-   inspected revisions and native dependency chain. Runtime packaging and custom
-   Gemma/native-TTS adapters are **not implemented or tested**. No alternate
-   server, cloud, or Foundation Models path was substituted.
+2. Pipecat embedded startup now passes; native speech adapter is implemented.
+   Audible Pipecat phrase, canonical VoiceCoordinating, Gemma adapter, and
+   practice orchestration still require completion. The earlier missing-fork
+   diagnosis was incorrect; the pinned reference includes the mobile fork.
 3. Gemma artifacts must be imported with known hashes. Executor cancellation,
    priority, warmup, E2B session switching, and attribution need Core-backed tests
    and real-device validation before enabling the coaching path. Currently load
    is manual; failed load does not create a startup retry loop.
-4. Await real camera result, then native phrase route proof, then Pipecat speech
-   proof. Only after explicit assigned-band authorization perform GET_INFO/tap
+4. Camera and native phrase passed; await audible Pipecat speech proof. Only after explicit assigned-band authorization perform GET_INFO/tap
    timing checks, then consented decoding/transcription checks.
 5. No demo video/submission claim should describe this checkpoint as a complete
    coaching product. Model weights remain fixed; no learning claim is verified.
@@ -134,3 +134,36 @@ returned `passed`, `stream=streaming`, `photoBytes=334852`, worn/connected/compa
 The photo stayed in app memory; only state metadata was copied. Signed iPhone
 Debug build passed and was installed. This proves a single real glasses photo,
 not sustained streaming, locked-phone behavior, inference, or Pipecat delivery.
+
+### Native speech confirmed
+
+User confirmed hearing the complete fixed test phrase through the glasses on
+November 14. This is a real-device, user-observed native synthesis/audio-route
+pass. It does not verify Pipecat, model generation, interruptions, or locked-phone
+playback. Next: package embedded Pipecat and route the same phrase through its
+native playback adapter. The earlier missing-fork blocker was an inspection
+error: the pinned reference includes its modified fork under `pipecat/`.
+
+### Band assignment update
+
+User assigned band number is 18. User reports a connection but is unsure which
+client owns it. This does not verify Voca discovery, GET_INFO, or tap events.
+Close any dashboard/other client before a Voca test; no new band scan or
+connection was performed during Pipecat packaging.
+
+### Embedded Pipecat startup verified
+
+Pinned iOS reference `6a204432df5cd533abb85e0577a7e79dccd93a04` supplies
+modified Pipecat `1.8.2.dev304`. Packaged checksum-pinned Python 3.13.14 and
+cross-compiled pydantic-core 2.46.5. Native extension frameworks are signed
+inside Voca. No PocketTTS assets, Foundation Models, server, or microphone
+capture is used. Custom `NativeSpeechAdapter` routes TTSSpeakFrame through
+Swift NativeAudio, awaiting the whole-playback acknowledgement.
+
+Signed physical-phone build/install passed. `--pipecat-check` on the actual
+iPhone produced `ready=true`, `status=Embedded Pipecat ready`. Two host pipeline
+tests passed against the real pinned fork (completion gating/stale and duplicate
+acknowledgements; cancelled playback). This is a speech-only integration step,
+not yet the canonical VoiceCoordinating service or Gemma/practice orchestration.
+Simulator Python extension build is not prepared yet; previous Simulator results
+predate this runtime addition. Awaiting user confirmation of audible Pipecat phrase.

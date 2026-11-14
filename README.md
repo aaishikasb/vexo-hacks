@@ -5,8 +5,9 @@ coaching loop is not yet integrated.** This checkpoint provides the signed-app
 setup path, glasses camera client, assigned-band BLE transport, native audio
 route test, consented on-device transcription sample, and verified model import.
 Review and Memory currently show honest empty/setup states. Core, coaching
-content, Pipecat voice orchestration, audits, practice, and learned feedback
-integration remain pending.
+content, full conversation orchestration, audits, practice, and learned feedback
+integration remain pending. A speech-only embedded Pipecat adapter is available
+for the next device check.
 
 ## Open and build
 
@@ -23,6 +24,12 @@ DEVELOPMENT_TEAM = YOUR_TEAM_ID
 ```
 
 ```sh
+# Install uv and rustup; ensure uv, rustup and cargo are on PATH.
+# One-time Rust toolchain setup:
+rustup toolchain install stable --profile minimal
+# Prepare pinned iPhone Python and native Pipecat dependency (no models).
+python3 scripts/setup_pipecat.py
+
 # Regenerate source membership; preserves an existing signing selection locally.
 python3 scripts/generate_project.py
 
@@ -43,7 +50,9 @@ swift test
 swift test --package-path Packages/VocaCore
 ```
 
-The SDK has arm64 Simulator binaries; x86_64 Simulator is excluded. Dependency
+The SDK has arm64 Simulator binaries; x86_64 Simulator is excluded. The new
+Python packaging currently prepares only the physical iPhone extension; repeat
+Simulator builds require adding and verifying the simulator cross-build first. Dependency
 versions and exact inspected revisions are in [docs/dependencies.md](docs/dependencies.md)
 and the Xcode workspace's committed `Package.resolved`.
 
@@ -55,10 +64,13 @@ and the Xcode workspace's committed `Package.resolved`.
    start the camera and request a photo. Already-granted permission is reused;
    startup reports its stage and times out with a retry path. Photos remain in app memory. The supplied
    Meta AI/glasses/DAT versions are user-reported baselines; compatibility with
-   resolved iOS DAT 1.0.1 still needs a real capture test.
+   resolved iOS DAT 1.0.1 passed a real capture test using Bluetooth Classic.
 3. Select glasses as the iPhone audio output, then confirm that route in the app.
    “Speak native test phrase” is a **native audio diagnostic**, not Pipecat proof.
+   User confirmed the complete native phrase through the glasses on November 14.
    Route changes interrupt speech; phone-speaker fallback is not allowed.
+   For the next check, press “Start embedded Pipecat,” wait for ready, then
+   “Speak test phrase through Pipecat.” Microphone capture remains off.
 4. Enter the band number printed on its bag. Close the laptop dashboard and
    double-tap the band. Only pressing **Connect assigned band** starts scanning.
    Service and exact advertised identity/manufacturer number are checked before
@@ -84,9 +96,12 @@ independent device setup can build while that package is absent; **its Core-boun
 implementation is not yet compiled or verified**. Remove this temporary boundary
 once the real package and product integration are ready.
 
-The Pipecat reference needs missing modified mobile modules; details and recovery
-work are in the dependency note. Nothing in this checkpoint claims that Pipecat
-launches, Gemma produces cues, feedback trains policy, or audits/practice work.
+The pinned Pipecat reference includes its modified mobile fork. The app now
+bundles its Python runtime and a custom speech-only FrameProcessor adapter;
+Swift acknowledges full native playback before Pipecat reports completion.
+Host checks: `PYTHONPATH=Voca/Voice/Python:.build/pipecat-ios/pipecat/src .build/pipecat-ios/.venv/bin/python -m unittest discover -s Tests/VoiceTests`.
+No claim is made yet that Gemma produces cues, feedback trains policy, or
+audits/practice work. See the handoff for physical Pipecat results.
 No five-second latency, thermal, memory, locked-phone, route-loss, or long-term
 learning measurements have been made.
 

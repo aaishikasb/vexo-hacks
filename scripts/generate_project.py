@@ -28,9 +28,9 @@ def render(value):
     return json.dumps(value)
 
 files, compiled, resources = [], [], []
-for path in sorted((ROOT / 'Voca').rglob('*.swift')):
+for path in sorted([*(ROOT / 'Voca').rglob('*.swift'), *(ROOT / 'Voca').rglob('*.m')]):
     name = str(path.relative_to(ROOT))
-    ref = obj(name, isa='PBXFileReference', lastKnownFileType='sourcecode.swift', path=name, sourceTree='<group>')
+    ref = obj(name, isa='PBXFileReference', lastKnownFileType='sourcecode.swift' if path.suffix == '.swift' else 'sourcecode.c.objc', path=name, sourceTree='<group>')
     files.append(ref)
     compiled.append(obj(name + '-build', isa='PBXBuildFile', fileRef=ref))
 packages, products, linked = [], [], []
@@ -54,11 +54,17 @@ for path in sorted((ROOT / 'Resources').rglob('*.json')):
     ref = obj(name, isa='PBXFileReference', lastKnownFileType='text.json', path=name, sourceTree='<group>')
     files.append(ref)
     resources.append(obj(name + '-build', isa='PBXBuildFile', fileRef=ref))
+python_ref = obj('Python-framework', isa='PBXFileReference', lastKnownFileType='wrapper.xcframework', path='.build/pipecat-ios/Vendor/Python.xcframework', sourceTree='<group>')
+files.append(python_ref)
+linked.append(obj('Python-link', isa='PBXBuildFile', fileRef=python_ref))
+python_embed = obj('Python-embed', isa='PBXBuildFile', fileRef=python_ref, settings={'ATTRIBUTES': ['CodeSignOnCopy', 'RemoveHeadersOnCopy']})
 config = obj('config', isa='PBXFileReference', lastKnownFileType='text.xcconfig', path='config/Build.xcconfig', sourceTree='<group>')
 app = obj('app', isa='PBXFileReference', explicitFileType='wrapper.application', path='Voca.app', sourceTree='BUILT_PRODUCTS_DIR')
 product_group = obj('products', isa='PBXGroup', children=[app], name='Products', sourceTree='<group>')
 group = obj('root', isa='PBXGroup', children=files+[config, product_group], sourceTree='<group>')
 phases = [obj(kind, isa=kind, buildActionMask=2147483647, files=items, runOnlyForDeploymentPostprocessing=0) for kind, items in [('PBXSourcesBuildPhase', compiled), ('PBXFrameworksBuildPhase', linked), ('PBXResourcesBuildPhase', resources)]]
+phases.append(obj('embed-python', isa='PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=10, files=[python_embed], name='Embed Python', runOnlyForDeploymentPostprocessing=0))
+phases.append(obj('bundle-python', isa='PBXShellScriptBuildPhase', buildActionMask=2147483647, files=[], inputPaths=[], outputPaths=[], name='Bundle Pipecat runtime', runOnlyForDeploymentPostprocessing=0, shellPath='/bin/sh', shellScript='"$SRCROOT/.build/pipecat-ios/.venv/bin/python" "$SRCROOT/scripts/bundle_pipecat.py"', alwaysOutOfDate=1))
 def configs(key, settings):
     configs = []
     for name in ['Debug', 'Release']:
