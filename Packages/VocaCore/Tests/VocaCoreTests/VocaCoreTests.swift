@@ -83,6 +83,50 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(episodes.first?.cue?.sourceIDs, [context.knownPointSourceID!])
     }
 
+    func testPendingCuePersistsAndRecoveryCancellationRetainsItWithoutReward() async throws {
+        let url = tempURL(), engine = try CoachEngine(storeURL: url), context = makeContext()
+        let decision = try await selected(engine, context)
+        let cue = CueResult(decisionID: decision.context.decisionID, actualProfile: decision.context.profile,
+            strategy: decision.selectedAction, text: "A grounded cue survives a relaunch.",
+            sourceIDs: decision.context.snapshot.dialogue.map(\.sourceID))
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .pending)
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .pending)
+        let relaunched = try CoachEngine(storeURL: url)
+        try await relaunched.recordDelivery(decisionID: decision.context.decisionID, cue: nil, status: .cancelled)
+        try await relaunched.recordDelivery(decisionID: decision.context.decisionID, cue: nil, status: .cancelled)
+        let persistedEpisodes = await relaunched.episodes()
+        let episode = try XCTUnwrap(persistedEpisodes.first)
+        XCTAssertEqual(episode.cue, cue)
+        XCTAssertEqual(episode.delivery, .cancelled)
+        do { try await relaunched.applyFeedback(FeedbackEvent(decisionID: decision.context.decisionID, verdict: .helpful, revision: 1)); XCTFail("recovered interrupted cue trained") } catch CoachEngineError.invalidFeedback {}
+    }
+
+    func testLatePendingCannotMutateTerminalDelivery() async throws {
+        for status in [DeliveryStatus.cancelled, .failed, .completed] {
+            let url = tempURL()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let engine = try CoachEngine(storeURL: url), context = makeContext()
+            let decision = try await selected(engine, context)
+            let cue = CueResult(decisionID: context.decisionID, actualProfile: context.profile,
+                strategy: decision.selectedAction, text: "A grounded cue.", sourceIDs: ["turn-1"])
+            try await engine.recordDelivery(decisionID: context.decisionID,
+                cue: status == .completed ? cue : nil, status: status)
+            let before = await engine.episodes()
+            for lateCue in [cue, nil] as [CueResult?] {
+                do {
+                    try await engine.recordDelivery(decisionID: context.decisionID, cue: lateCue, status: .pending)
+                    XCTFail("Pending update accepted after terminal delivery")
+                } catch CoachEngineError.conflictingTerminalDelivery {}
+            }
+            let after = await engine.episodes()
+            XCTAssertEqual(after, before)
+            let reopened = try CoachEngine(storeURL: url)
+            let persisted = await reopened.episodes()
+            XCTAssertEqual(persisted, before)
+            try await engine.recordDelivery(decisionID: context.decisionID, cue: nil, status: status)
+        }
+    }
+
     func testSignedUpdateNumericFeedbackReplayAndProfileSeparation() async throws {
         let url = tempURL(), profile = VocaFixtures.profile()
         let engine = try CoachEngine(storeURL: url)
@@ -200,6 +244,30 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(Set(decoded.cards.map(\.bookTitle)), Set(["The Communication Book", "The Art of Witty Banter", "How to Listen with Intention", "Thanks for the Feedback", "The Decision Book", "Show Your Work!", "Radical Candor", "Read People Like a Book", "The Well-Spoken Thesaurus"]))
         let invalid = String(decoding: scenarios, as: UTF8.self).replacingOccurrences(of: "listen-then-follow", with: "missing-card")
         XCTAssertThrowsError(try CoachingContent.decode(cards: cards, scenarios: Data(invalid.utf8)))
+        let unlabelled = String(decoding: scenarios, as: UTF8.self).replacingOccurrences(of: "SIMULATED PARTNER: ", with: "PARTNER: ")
+        XCTAssertThrowsError(try CoachingContent.decode(cards: cards, scenarios: Data(unlabelled.utf8))) { XCTAssertTrue($0 is ContentError) }
+    }
+
+    func testAuditReadyRequiresAttributableWearerSourceAndWaitingHasNoClaims() throws {
+        let decisionID = UUID(), profile = VocaFixtures.profile()
+        let wearer = Evidence(sourceID: "wearer-1", text: "I helped organize the garden", speaker: "wearer")
+        let partner = Evidence(sourceID: "partner-1", text: "That sounds interesting", speaker: "partner-1")
+        let valid = AuditReport(decisionID: decisionID, generationProfile: profile, status: .ready,
+            strength: "You described one concrete action.", opportunity: "You could add what you learned.",
+            exercise: "Try the explanation in two sentences.", sourceIDs: [wearer.sourceID], principleID: "clear-one-idea")
+        XCTAssertNoThrow(try AuditReportValidator.validate(valid, decisionID: decisionID,
+            dialogue: [partner, wearer], knownPrincipleIDs: ["clear-one-idea"]))
+
+        var wrongSource = valid; wrongSource.sourceIDs = [partner.sourceID]
+        XCTAssertThrowsError(try AuditReportValidator.validate(wrongSource, decisionID: decisionID,
+            dialogue: [partner, wearer], knownPrincipleIDs: ["clear-one-idea"])) { XCTAssertEqual($0 as? AuditValidationError, .invalidSourceReferences) }
+        XCTAssertThrowsError(try AuditReportValidator.validate(valid, decisionID: decisionID,
+            dialogue: [partner], knownPrincipleIDs: ["clear-one-idea"])) { XCTAssertEqual($0 as? AuditValidationError, .noAttributableWearerEvidence) }
+
+        let waiting = AuditReport(decisionID: decisionID, generationProfile: nil, status: .waitingForTranscript)
+        XCTAssertNoThrow(try AuditReportValidator.validate(waiting, decisionID: decisionID, dialogue: [], knownPrincipleIDs: []))
+        var unsupported = waiting; unsupported.opportunity = "Try asking a question."
+        XCTAssertThrowsError(try AuditReportValidator.validate(unsupported, decisionID: decisionID, dialogue: [], knownPrincipleIDs: [])) { XCTAssertEqual($0 as? AuditValidationError, .waitingContainsClaims) }
     }
 
     func testVoiceFixtureInterruptedNeverMeansCompletion() {

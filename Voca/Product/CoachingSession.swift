@@ -43,6 +43,7 @@ import VocaCore
                     requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
                 guard let cue else { return }
                 try Task.checkCancellation()
+                try await coach.recordDelivery(decisionID: cue.decisionID, cue: cue, status: .pending)
                 status = "Speaking your cue…"
                 try await voice.speak(cue.text)
                 // A finished native utterance remains completed even if cancellation arrives afterward.

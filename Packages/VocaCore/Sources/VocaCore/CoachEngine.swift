@@ -88,27 +88,45 @@ public actor CoachEngine {
         guard let i = store.episodes.firstIndex(where: { $0.id == decisionID }) else { throw CoachEngineError.unknownDecision }
         var episode = store.episodes[i]
         if episode.delivery != .pending {
-            if episode.delivery == status && episode.cue == cue { return }
+            let candidate = cue ?? episode.cue
+            if episode.delivery == status && episode.cue == candidate { return }
             throw CoachEngineError.conflictingTerminalDelivery
         }
-        if status == .pending { return }
-        if let cue {
-            guard cue.decisionID == decisionID, cue.actualProfile == episode.decision.context.profile, cue.strategy == episode.decision.selectedAction, !cue.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CoachEngineError.invalidCue }
-            let approvedMemorySources = episode.decision.context.snapshot.approvedMemories.filter(\.shareApproved).map(\.sourceID)
-            let knownPointSources = episode.decision.context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                ? [episode.decision.context.knownPointSourceID].compactMap { $0 } : []
-            let allowed = Set(approvedMemorySources + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString] + knownPointSources)
-            guard Set(cue.sourceIDs).isSubset(of: allowed) else { throw CoachEngineError.invalidEvidenceReferences }
-            if episode.decision.selectedAction == .explainClearly {
-                guard let sourceID = episode.decision.context.knownPointSourceID, cue.sourceIDs.contains(sourceID) else {
-                    throw CoachEngineError.invalidEvidenceReferences
-                }
+        if status == .pending {
+            guard let cue else { return }
+            try Self.validate(cue: cue, for: episode)
+            if let existing = episode.cue {
+                guard existing == cue else { throw CoachEngineError.invalidCue }
+                return
+            }
+            let previousStore = store
+            episode.cue = cue; store.episodes[i] = episode
+            do { try persist() } catch { store = previousStore; throw error }
+            return
+        }
+        if let cue, let existing = episode.cue, cue != existing { throw CoachEngineError.invalidCue }
+        let effectiveCue = cue ?? episode.cue
+        if let effectiveCue { try Self.validate(cue: effectiveCue, for: episode) }
+        guard (status == .completed && effectiveCue != nil) || status == .failed || status == .cancelled else { throw CoachEngineError.invalidCue }
+        let previousStore = store
+        episode.cue = effectiveCue; episode.delivery = status; store.episodes[i] = episode
+        do { try persist() } catch { store = previousStore; throw error }
+    }
+
+    private static func validate(cue: CueResult, for episode: Episode) throws {
+        guard cue.decisionID == episode.id, cue.actualProfile == episode.decision.context.profile,
+              cue.strategy == episode.decision.selectedAction,
+              !cue.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CoachEngineError.invalidCue }
+        let approvedMemorySources = episode.decision.context.snapshot.approvedMemories.filter(\.shareApproved).map(\.sourceID)
+        let knownPointSources = episode.decision.context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? [episode.decision.context.knownPointSourceID].compactMap { $0 } : []
+        let allowed = Set(approvedMemorySources + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString] + knownPointSources)
+        guard Set(cue.sourceIDs).isSubset(of: allowed) else { throw CoachEngineError.invalidEvidenceReferences }
+        if episode.decision.selectedAction == .explainClearly {
+            guard let sourceID = episode.decision.context.knownPointSourceID, cue.sourceIDs.contains(sourceID) else {
+                throw CoachEngineError.invalidEvidenceReferences
             }
         }
-        guard status == .pending || (status == .completed && cue != nil) || status == .failed || status == .cancelled else { throw CoachEngineError.invalidCue }
-        let previousStore = store
-        episode.cue = cue; episode.delivery = status; store.episodes[i] = episode
-        do { try persist() } catch { store = previousStore; throw error }
     }
 
     public func applyFeedback(_ event: FeedbackEvent) throws {
