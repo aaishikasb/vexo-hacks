@@ -32,6 +32,10 @@ struct SetupView: View {
     @Bindable var band: BandClient
     @State private var models = ModelLibrary()
     @State private var coaching = CoachingSession()
+    @State private var memory = MemoryStore()
+    @State private var reviewingEpisode: Episode?
+    @State private var showPractice = false
+    @State private var waveTrigger = 0
     @State private var selectedModel = "gemma4E4B"
     @State private var expectedSHA256 = ""
     @State private var importingModel = false
@@ -54,7 +58,7 @@ struct SetupView: View {
     @State private var showTapCalibration = false
     @State private var operation = OperationState()
     @Environment(\.scenePhase) private var scenePhase
-    var body: some View {
+    private var tabs: some View {
         TabView(selection: $activeTab) {
             NavigationStack {
                 sessionScreen
@@ -70,45 +74,108 @@ struct SetupView: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        Text("Recent cues").font(.largeTitle.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Look back on what helped. Ratings stay attached to the cue you heard.")
+                        Text("Make the next conversation yours.").font(.largeTitle.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                        Text("Practice a new approach, or look back at a cue and what helped.")
                             .foregroundStyle(VocaTheme.secondary)
-                        if coaching.episodes.filter({ $0.cue != nil }).isEmpty {
-                            Text("Your first completed cue will appear here.")
+                        Button("Start spoken practice") {
+                            Task {
+                                await coaching.stop(voice: pipecat, executor: models.executor)
+                                await listening.stop(band: band)
+                                showPractice = true
+                            }
+                        }.buttonStyle(VocaPrimaryButton()).disabled(!softwareReady || !pipecat.ready || operation.busy)
+                        if !softwareReady || !pipecat.ready {
+                            Button("Prepare on-device guidance") { prepareSoftware() }.buttonStyle(.bordered)
+                            Text("Practice uses a simulated scenario. Glasses are optional.").font(.subheadline).foregroundStyle(VocaTheme.secondary)
+                        }
+                        Text("Cue history").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                        if coaching.episodes.isEmpty {
+                            Text("Your cues and feedback will appear here. Request a cue to begin.")
                             Button("Start a session") { activeTab = 0 }.buttonStyle(.bordered)
                         }
-                        ForEach(coaching.episodes.reversed().filter { $0.cue != nil }) { episode in
-                            cueCard(episode)
+                        ForEach(coaching.episodes.reversed()) { episode in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(episode.decision.context.requestedAt, format: .dateTime.month().day().hour().minute())
+                                    .font(.caption).foregroundStyle(VocaTheme.secondary)
+                                cueCard(episode)
+                                Button("Review this conversation") {
+                                    Task {
+                                        await coaching.stop(voice: pipecat, executor: models.executor)
+                                        reviewingEpisode = episode
+                                    }
+                                }.buttonStyle(.bordered).disabled(operation.busy)
+                            }
                         }
-                        Text("Conversation audits need attributable dialogue. They aren’t available in this build.")
-                            .font(.footnote).foregroundStyle(VocaTheme.secondary)
+                        if let error = coaching.lastError { Text(error).foregroundStyle(VocaTheme.secondary) }
                     }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
                 }.background(VocaTheme.background)
             }.tabItem { Label("Review", systemImage: "text.bubble") }.tag(1)
             NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Image(systemName: "lock.shield").font(.largeTitle)
-                        Text("Your stories. Your choice.").font(.largeTitle.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Only stories you approve can become personal memory. Nothing from practice or an unknown speaker is saved as your story.")
-                            .foregroundStyle(VocaTheme.secondary)
-                        Text("Memory editing is coming next. For now, cues use the photo you request and any point you enter.")
-                        Button("Return to session") { activeTab = 0 }.buttonStyle(.bordered)
-                    }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
-                }.background(VocaTheme.background)
+                MemoryView(store: memory) { sourceID in
+                    try await deleteEvidence(sourceID)
+                }
             }.tabItem { Label("Memory", systemImage: "person.text.rectangle") }.tag(2)
         }
+    }
+    private var presentedTabs: some View {
+        tabs
         .tint(VocaTheme.foreground)
         .foregroundStyle(VocaTheme.foreground)
+        .sheet(item: $reviewingEpisode) { episode in
+            NavigationStack {
+                AuditView(episode: episode, store: memory, model: models.executor, canGenerate: softwareReady)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { reviewingEpisode = nil } } }
+            }
+        }
+        .sheet(isPresented: $showPractice) {
+            PracticeView(model: models.executor, voice: pipecat, audio: audio)
+        }
         .sheet(isPresented: $showSetup) { setupSheet }
         .sheet(isPresented: $showDiagnostics) {
             NavigationStack { diagnostics.navigationTitle("Advanced controls")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showDiagnostics = false } } } }
         }
         .disabled(checkingModel)
-        .task {
+    }
+    var body: some View {
+        presentedTabs
+        .task { await initializeSession() }
+        .onChange(of: band.info == nil) { _, disconnected in
+            if disconnected { tapTask?.cancel(); tapGate.reset(); tapCalibration.reset() }
+        }
+        .onChange(of: coaching.busy) { _, busy in
+            if !busy { Task { softwareReady = (try? await models.executor.activeProfile()) != nil } }
+        }
+        .onChange(of: coaching.status) { _, status in
+            UIAccessibility.post(notification: .announcement, argument: status)
+        }
+        .onChange(of: selectedModel) { _, selected in
+            expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selected })?.sha256 ?? ""
+        }
+        .fileImporter(isPresented: $importingModel, allowedContentTypes: [.data]) { result in
+            switch result {
+            case .success(let url):
+                let model = selectedModel
+                let hash = expectedSHA256
+                run { try await models.importFile(url, modelID: model, expectedSHA256: hash) }
+            case .failure(let failure): operation.error = failure.localizedDescription
+            }
+        }
+        .confirmationDialog("Everyone nearby must agree to microphone capture. Audio is transcribed on this iPhone; the band Bluetooth link is not encrypted. Keep the blue microphone light visible.", isPresented: $showCaptureConsent, titleVisibility: .visible) {
+            Button("Everyone agrees — start 10-second capture") { run { try await listening.startConsentedSample(band: band) } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: scenePhase) { (_: ScenePhase, phase: ScenePhase) in
+            if phase == .background { suspendSession() }
+        }
+    }
+    private func initializeSession() async {
             do { try camera.configure() } catch { operation.error = error.localizedDescription }
             await coaching.configure()
+            do {
+                try memory.load()
+                try await memory.finishPendingDeletions { try await deleteEvidence($0) }
+            } catch { operation.error = "Memory needs attention. Open Memory to retry pending deletions, or restart Voca; existing data is preserved." }
             draftBandNumber = bandNumber
             band.onTap = { milliseconds, code in receiveTap(milliseconds: milliseconds, code: code) }
             expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selectedModel })?.sha256 ?? ""
@@ -126,6 +193,30 @@ struct SetupView: View {
                 await models.checkSceneOnDevice(camera: camera, pipecatReady: pipecat.ready, modelID: checkModel)
                 UIApplication.shared.isIdleTimerDisabled = false
                 checkingModel = false
+            }
+            if ProcessInfo.processInfo.arguments.contains("--review-model-check") {
+                checkingModel = true
+                UIApplication.shared.isIdleTimerDisabled = true
+                await ReviewModelCheck.run(models: models)
+                UIApplication.shared.isIdleTimerDisabled = false
+                softwareReady = (try? await models.executor.activeProfile()) != nil
+                checkingModel = false
+            }
+            if ProcessInfo.processInfo.arguments.contains("--practice-bridge-check") {
+                pipecat.start(audio: audio)
+                for _ in 0..<100 {
+                    if pipecat.ready { break }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                var result: [String: Any] = ["passed": false, "fixture": true]
+                do {
+                    try await pipecat.acceptPracticeTurn(PracticeTurn(id: UUID(), sessionID: UUID(), generation: 0,
+                        text: "This is a synthetic practice bridge check.", isFinal: true))
+                    result["passed"] = true
+                } catch { result["error"] = error.localizedDescription }
+                if let data = try? JSONSerialization.data(withJSONObject: result) {
+                    try? data.write(to: URL.documentsDirectory.appending(path: "practice-bridge-check.json"), options: .atomic)
+                }
             }
             if ProcessInfo.processInfo.arguments.contains("--speech-check") {
                 let transcriber = LocalTranscriber()
@@ -157,36 +248,35 @@ struct SetupView: View {
                 }
             }
             #endif
-        }
-        .onChange(of: band.info == nil) { _, disconnected in
-            if disconnected { tapTask?.cancel(); tapGate.reset(); tapCalibration.reset() }
-        }
-        .onChange(of: coaching.busy) { _, busy in
-            if !busy { Task { softwareReady = (try? await models.executor.activeProfile()) != nil } }
-        }
-        .onChange(of: coaching.status) { _, status in
-            UIAccessibility.post(notification: .announcement, argument: status)
-        }
-        .onChange(of: selectedModel) { _, selected in
-            expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selected })?.sha256 ?? ""
-        }
-        .fileImporter(isPresented: $importingModel, allowedContentTypes: [.data]) { result in
-            switch result {
-            case .success(let url):
-                let model = selectedModel
-                let hash = expectedSHA256
-                run { try await models.importFile(url, modelID: model, expectedSHA256: hash) }
-            case .failure(let failure): operation.error = failure.localizedDescription
-            }
-        }
-        .confirmationDialog("Everyone nearby must agree to microphone capture. Audio is transcribed on this iPhone; the band Bluetooth link is not encrypted. Keep the blue microphone light visible.", isPresented: $showCaptureConsent, titleVisibility: .visible) {
-            Button("Everyone agrees — start 10-second capture") { run { try await listening.startConsentedSample(band: band) } }
-            Button("Cancel", role: .cancel) {}
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { sessionEnabled = false; tapTask?.cancel(); tapGate.cancelPending(); camera.suspendForBackground(); pipecat.stop(); audio.deactivate(); Task { await coaching.stop(voice: pipecat, executor: models.executor); await listening.stop(band: band) } }
+    }
+
+    private func deleteEvidence(_ sourceID: String) async throws {
+        await coaching.stop(voice: pipecat, executor: models.executor)
+        let dependentIDs = Set(coaching.episodes.filter { episode in
+            let context = episode.decision.context
+            return context.snapshot.approvedMemories.contains { $0.sourceID == sourceID } ||
+                context.snapshot.dialogue.contains { $0.sourceID == sourceID } ||
+                context.knownPointSourceID == sourceID || episode.cue?.sourceIDs.contains(sourceID) == true
+        }.map(\.id))
+        try memory.removeDerivedData(decisionIDs: dependentIDs)
+        try await coaching.deleteEvidence(sourceID: sourceID)
+    }
+
+    private func suspendSession() {
+        showPractice = false
+        reviewingEpisode = nil
+        sessionEnabled = false
+        tapTask?.cancel()
+        tapGate.cancelPending()
+        camera.suspendForBackground()
+        pipecat.stop()
+        audio.deactivate()
+        Task {
+            await coaching.stop(voice: pipecat, executor: models.executor)
+            await listening.stop(band: band)
         }
     }
+
     private var diagnostics: some View {
 Form {
                     Section {
@@ -275,7 +365,9 @@ Form {
                         }
                         Text(coaching.status)
                         Button("Request a spoken cue") {
-                            coaching.request(models: models, camera: camera, voice: pipecat)
+                            activeTab = 0
+        waveTrigger += 1
+        coaching.request(models: models, camera: camera, voice: pipecat, snapshot: memory.snapshot())
                         }.disabled(coaching.busy || !camera.ready || !pipecat.ready)
                         Button("Cancel cue") {
                             Task { await coaching.stop(voice: pipecat, executor: models.executor) }
@@ -299,7 +391,7 @@ Form {
     }
 
     private var cueReady: Bool {
-        sessionEnabled && coaching.isConfigured && softwareReady && camera.ready && pipecat.ready && audio.routeIsValid && !coaching.busy && !operation.busy
+        sessionEnabled && memory.loaded && memory.pendingDeletionIDs.isEmpty && !showPractice && reviewingEpisode == nil && coaching.isConfigured && softwareReady && camera.ready && pipecat.ready && audio.routeIsValid && !coaching.busy && !operation.busy
     }
 
     private var goalTitle: String {
@@ -324,7 +416,8 @@ Form {
                     Text(coaching.busy ? "A little space to find your words." : "Be here.\nFind your words.")
                         .font(.largeTitle.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
-                    if coaching.busy { GuidanceOrb() } else { CueWave() }
+                    CueWave(trigger: waveTrigger)
+                    if coaching.busy { GuidanceOrb() }
                     Text(coaching.busy ? coaching.status : cueReady ?
                          (tapGate.mappingVerified ? "Tap band \(bandNumber) once for a short spoken cue." : "Ask for a cue below. Set up band taps when your devices are ready.") :
                          "A small prompt for the conversation in front of you. Prepare your devices to begin.")
@@ -352,13 +445,16 @@ Form {
                             .textFieldStyle(.roundedBorder).accessibilityLabel("The point you want to explain")
                     }
                     if coaching.goal == .deepen {
-                        Text("Going deeper needs attributable dialogue. Start a conversation or enter a point to explain for now.")
+                        Text("Going deeper uses approved memories or attributable dialogue. Add a story in Memory, or explain a point instead.")
                             .font(.subheadline).foregroundStyle(VocaTheme.secondary)
                     }
                 }
                 if coaching.busy {
                     Button("Stop cue", role: .cancel) { stopSessionWork() }.buttonStyle(VocaPrimaryButton())
                 } else if cueReady {
+                    if band.info != nil && !tapGate.mappingVerified {
+                        Button("Enable band tap cues") { showTapCalibration = true; showSetup = true }.buttonStyle(.bordered)
+                    }
                     Button { requestCue() } label: { Label("Give me a cue", systemImage: "sparkle") }
                         .buttonStyle(VocaPrimaryButton())
                 } else {
@@ -397,7 +493,7 @@ Form {
                     Text(feedback.verdict == .helpful ? "Saved as helpful" : feedback.verdict == .unhelpful ? "Saved as unhelpful" : "Saved as not tried")
                         .font(.subheadline).foregroundStyle(VocaTheme.secondary)
                 }
-            } else { Text("Only a fully spoken cue can be rated.").font(.subheadline).foregroundStyle(VocaTheme.secondary) }
+            } else { Text(episode.cue == nil ? "No cue was delivered. You can request another from Session." : "Only a fully spoken cue can be rated.").font(.subheadline).foregroundStyle(VocaTheme.secondary) }
         }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             .background(VocaTheme.surface, in: RoundedRectangle(cornerRadius: 24))
     }
@@ -530,7 +626,9 @@ Form {
     private func requestCue() {
         guard cueReady else { showSetup = true; return }
         tapTask?.cancel(); tapGate.cancelPending()
-        coaching.request(models: models, camera: camera, voice: pipecat)
+        activeTab = 0
+        waveTrigger += 1
+        coaching.request(models: models, camera: camera, voice: pipecat, snapshot: memory.snapshot())
     }
 
     private func stopSessionWork() {

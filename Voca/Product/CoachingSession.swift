@@ -30,7 +30,7 @@ import VocaCore
         } catch { status = "Coaching history could not be opened. Your existing data has been preserved. Restart Voca to retry."; lastError = status }
     }
 
-    func request(models: ModelLibrary, camera: GlassesCamera, voice: PipecatSpeech) {
+    func request(models: ModelLibrary, camera: GlassesCamera, voice: PipecatSpeech, snapshot: MemorySnapshot? = nil) {
         guard !busy, let coach else { return }
         guard camera.ready, voice.ready else { status = "Start the glasses camera and embedded Pipecat first."; return }
         busy = true
@@ -46,7 +46,7 @@ import VocaCore
                 let requestedProfile = try await model.activeProfile()
                 do {
                     cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
-                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
+                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
                 } catch LiteRTExecutor.Failure.nativeFailure where requestedProfile.modelID == .gemma4E4B {
                     try Task.checkCancellation()
                     status = "E4B recovery failed. Loading E2B fallback for this cue…"
@@ -54,7 +54,7 @@ import VocaCore
                     try Task.checkCancellation()
                     // A new pipeline decision records E2B's profile; the failed E4B episode stays failed.
                     cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
-                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
+                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
                 }
                 guard let cue else { return }
                 try Task.checkCancellation()
@@ -83,6 +83,12 @@ import VocaCore
         voice.stop()
         await executor.cancelAll()
         await work?.value
+    }
+
+    func deleteEvidence(sourceID: String) async throws {
+        guard let coach else { throw CoachEngineError.persistenceFailure }
+        try await coach.deleteEvidence(sourceID: sourceID)
+        episodes = await coach.episodes()
     }
 
     func feedback(_ verdict: FeedbackVerdict, episode: Episode) async {

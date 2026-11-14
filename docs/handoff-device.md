@@ -455,3 +455,71 @@ Remaining: physical tap calibration/tap-to-cue regression, VoiceOver and keyboar
 interaction, maximum Dynamic Type, and voice audition. Audits and Memory editing
 remain unfinished. Simulator fixture screenshots do not demonstrate hardware
 or inference. E4B SDK recovery limitations remain as documented above.
+
+
+### Memory, grounded Review, practice, and motion — 2026-11-14
+
+Implemented approved local Memory, cue-attributed real dialogue entry, grounded
+audit orchestration, and spoken scenario practice. Review lists all cue attempts
+and saved/correctable feedback; failed or interrupted deliveries cannot be rated.
+The same request action handles the button and calibrated assigned-band taps.
+Waves pulse on first appearance and accepted requests; the gradient moves during
+cue work, with reduced-motion and lifecycle handling.
+
+Memory snapshots supply up to four approved details to the existing cue pipeline;
+personal-connection output must cite an approved source. Memory is protected and
+excluded from backups. Deletion uses durable retry tombstones, clears dependent
+audits/dialogue and Core episodes/learning, and blocks cues until cleanup finishes.
+Historic excerpts retain unknown times and do not become fresh live dialogue.
+
+Audits use activeProfile(), one goal-relevant coaching card, bounded attributable
+wearer evidence, strict generated-field/source validation and Core validation.
+Missing/unknown-speaker evidence returns waitingForTranscript without inference.
+Practice uses explicit iPhone-speaker opt-in, phone microphone only after Speak,
+on-device-only recognition, final-turn Pipecat handshake, serialized Gemma and
+native playback. Interrupt and speak cancels/awaits the old reply; only fully
+spoken replies join simulated context. No practice rewards or personal memories.
+Practice is push-to-talk, not passive barge-in; its transcript is session-only.
+
+Checks: 35 host fixture tests pass, including six memory/audit tests, two practice
+tests and approved-memory cue-source checks. Signed iPhone build passed. Actual
+SwiftUI rendered with stub services in Simulator: Memory empty/filled, waiting
+Audit, Review history/feedback and Practice, including Accessibility3. Scenario
+picker clipping fixed. See ui-preview/README.md; screenshots are synthetic.
+Physical iPhone Pipecat final-turn handshake passed with synthetic text only.
+No glasses, microphone or speech playback was activated by these checks.
+
+Remaining: physical speech recognition/assets and practice audition, real audit
+quality, tap calibration/full tap-to-cue regression with charged glasses, VoiceOver
+and keyboard interaction, maximum Dynamic Type and animation performance.
+
+Prompt profile is now voca-v2.7-approved-memory-review. Existing cue feedback
+retains its original profile; the new prompt uses a separate Core policy namespace.
+Physical audit validation caught omitted sourceIDs/principleID; the prompt now
+shows the full five-field answer shape and continues to reject missing references.
+Core package check: 17 tests, zero failures.
+
+Physical synthetic E4B check after the prompt correction: auditPassed=true,
+practicePassed=true, audit generation/validation 6.3963 s. This validates one
+synthetic audit and one generated practice reply, not live recognition or audio.
+User subsequently reported the iPhone-speaker practice start did not begin;
+startup status is now above the action with a local metadata-only diagnostic.
+The route restriction was diagnosed and fixed as recorded below.
+
+Practice routing update at user request: Start practice accepts the currently
+selected output instead of requiring/forcing the iPhone speaker. NativeAudio
+keeps practice-route authorization separate from live glasses confirmation,
+uses the phone microphone only on explicit Speak, and stops on route loss.
+The initial startup failure was a speaker-only route guard, confirmed by local
+status metadata; that restriction is removed.
+
+User-confirmed physical practice opener playback through the selected output
+after removing the speaker-only restriction. Recognition → generated reply is
+being checked separately; opener playback alone does not prove that path.
+
+The first Speak my turn device attempt crashed in the speech-authorization
+callback: EXC_BREAKPOINT / _dispatch_assert_queue_fail / swift_task_checkIsolated,
+PracticeSession.listen callback on com.apple.root.default-qos. Permission,
+recognition, and audio-tap callbacks now explicitly use @Sendable; UI updates
+remain on MainActor. Signed rebuild and installation passed; physical retry
+is requested. Crash reports remain outside Git.

@@ -33,8 +33,11 @@ struct VocaPrimaryButton: ButtonStyle {
     }
 }
 
-/// A static brand motif, never presented as microphone activity or an audio meter.
+/// Request feedback, never presented as microphone activity or an audio meter.
 struct CueWave: View {
+    var trigger = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var entrance = false
     var body: some View {
         Canvas { context, size in
             for layer in 0..<3 {
@@ -48,7 +51,15 @@ struct CueWave: View {
                 }
                 context.stroke(path, with: .color(VocaTheme.accent.opacity(0.35 + Double(layer) * 0.25)), lineWidth: 1.5)
             }
-        }.frame(height: 80).accessibilityHidden(true)
+        }
+        .frame(height: 80)
+        .phaseAnimator([false, true, false], trigger: trigger + (entrance ? 1 : 0)) { content, lifted in
+            content
+                .scaleEffect(x: 1, y: lifted && !reduceMotion ? 1.16 : 1)
+                .opacity(lifted ? 1 : 0.8)
+        } animation: { _ in .easeInOut(duration: 0.25) }
+        .onAppear { entrance = true }
+        .accessibilityHidden(true)
     }
 }
 
@@ -72,16 +83,28 @@ struct ReadinessRow: View {
 }
 
 struct GuidanceOrb: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var moving = false
     var body: some View {
         ZStack {
-            Circle().fill(RadialGradient(colors: [.black, Color.blue.opacity(0.65), .black],
-                                         center: .topLeading, startRadius: 8, endRadius: 180))
-            Ellipse().fill(LinearGradient(colors: [.cyan.opacity(0.7), .blue.opacity(0.25), .clear],
-                                          startPoint: .bottomLeading, endPoint: .topTrailing))
-                .frame(height: 70).rotationEffect(.degrees(-25)).blur(radius: 18)
+            ZStack {
+                Circle().fill(RadialGradient(colors: [.black, Color.blue.opacity(0.65), .black],
+                                             center: .topLeading, startRadius: 8, endRadius: 180))
+                Ellipse().fill(LinearGradient(colors: [.cyan.opacity(0.7), .blue.opacity(0.25), .clear],
+                                              startPoint: .bottomLeading, endPoint: .topTrailing))
+                    .frame(height: 70).rotationEffect(.degrees(-25)).blur(radius: 18)
+            }
+            .rotationEffect(.degrees(moving ? 360 : 0))
+            // A slow continuous turn indicates ongoing generation, not measured progress.
+            .animation(moving ? .linear(duration: 8).repeatForever(autoreverses: false) : nil, value: moving)
             Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1)
         }.frame(width: 176, height: 176).clipShape(Circle())
             .frame(maxWidth: .infinity).padding(.vertical, 16).accessibilityHidden(true)
+            .onAppear { moving = !reduceMotion && scenePhase == .active }
+            .onChange(of: scenePhase) { _, phase in moving = !reduceMotion && phase == .active }
+            .onChange(of: reduceMotion) { _, reduced in moving = !reduced && scenePhase == .active }
+            .onDisappear { moving = false }
     }
 }
 

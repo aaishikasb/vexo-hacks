@@ -76,3 +76,37 @@ private actor FixtureModel: ModelGenerating {
     }
     #expect(await coach.episodes().first?.delivery == .failed)
 }
+
+private actor MemoryCueModel: ModelGenerating {
+    let profile = ModelProfile(modelID: .gemma4E4B, artifactSHA256: "fixture", promptVersion: "memory-fixture")
+    let useMemory: Bool
+    init(useMemory: Bool) { self.useMemory = useMemory }
+    func activeProfile() -> ModelProfile { profile }
+    func generate(_ request: ModelRequest) -> ModelResponse {
+        let text: String
+        if request.kind == .scene {
+            text = #"{"setting":"other","observations":[],"uncertain":true}"#
+        } else {
+            text = "{\"text\":\"Share how growing tomatoes helped you enjoy gardening this summer.\",\"sourceIDs\":[\"\(useMemory ? "approved-story" : "invented")\"]}"
+        }
+        return ModelResponse(requestID: request.requestID, actualProfile: profile, text: text)
+    }
+}
+
+@Test(arguments: [true, false]) func personalCueMustCiteApprovedMemory(useMemory: Bool) async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+    let snapshot = MemorySnapshot(approvedMemories: [Evidence(sourceID: "approved-story", text: "I grew tomatoes this summer.", speaker: "wearer", utteredAt: nil, shareApproved: true)], dialogue: [], fetchedAt: Date(), coverage: .partial)
+    let pipeline = CuePipeline(model: MemoryCueModel(useMemory: useMemory), coach: coach)
+    if useMemory {
+        let cue = try await pipeline.prepare(photo: Data([1]), observedAt: Date(), requestedAt: Date(), goal: .deepen, knownPoint: nil, snapshot: snapshot)
+        #expect(cue.strategy == .personalConnection)
+        #expect(cue.sourceIDs == ["approved-story"])
+        #expect(await coach.episodes().first?.decision.context.snapshot == snapshot)
+    } else {
+        await #expect(throws: GeneratedFields.Failure.self) {
+            try await pipeline.prepare(photo: Data([1]), observedAt: Date(), requestedAt: Date(), goal: .deepen, knownPoint: nil, snapshot: snapshot)
+        }
+    }
+}

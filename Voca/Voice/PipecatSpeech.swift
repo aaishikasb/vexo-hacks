@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import VocaCore
 
 /// Fixed-phrase integration stage; shared VoiceCoordinating is integrated with Core next.
 @MainActor @Observable final class PipecatSpeech {
@@ -12,6 +13,9 @@ import Observation
     private var playback: Task<Void, Never>?
     private var watchdog: Task<Void, Never>?
     private var started = false
+    private var turnID: UUID?
+    private var turnCompletion: CheckedContinuation<Void, Error>?
+    private var turnTimeout: Task<Void, Never>?
 
     func start(audio: NativeAudio) {
         guard !started else { return }
@@ -44,7 +48,34 @@ import Observation
         } onCancel: { Task { @MainActor [weak self] in if self?.requestID == id { self?.stop() } } }
     }
 
+    /// Pipecat receives a final recognition frame before Swift schedules Gemma.
+    func acceptPracticeTurn(_ turn: VocaCore.PracticeTurn) async throws {
+        guard ready, turn.isFinal, turnCompletion == nil else { throw Failure.notReady }
+        try Task.checkCancellation()
+        turnID = turn.id
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                turnCompletion = continuation
+                send(["type": "practiceTurn", "requestID": turn.id.uuidString.lowercased(),
+                      "sessionID": turn.sessionID.uuidString.lowercased(), "generation": String(turn.generation),
+                      "text": turn.text, "timestamp": turn.utteredAt.ISO8601Format()])
+                turnTimeout = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled, self?.turnID == turn.id else { return }
+                    self?.finishTurn(.failure(Failure.notReady))
+                }
+            }
+        } onCancel: { Task { @MainActor [weak self] in
+            if self?.turnID == turn.id { self?.finishTurn(.failure(CancellationError())) }
+        } }
+    }
+    private func finishTurn(_ result: Result<Void, Error>) {
+        turnTimeout?.cancel(); turnTimeout = nil
+        let pending = turnCompletion; turnCompletion = nil; turnID = nil
+        pending?.resume(with: result)
+    }
     func stop() {
+        finishTurn(.failure(CancellationError()))
         guard let id = requestID else { return }
         playback?.cancel()
         audio?.stop()
@@ -62,6 +93,10 @@ import Observation
     private func receive(_ json: String) {
         guard let data = json.data(using: .utf8),
               let event = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+        if event["type"] == "practiceTurnAccepted" {
+            if let rawID = event["requestID"], UUID(uuidString: rawID) == turnID { finishTurn(.success(())) }
+            return
+        }
         if event["type"] == "ready" { ready = true; status = "Embedded Pipecat ready"; return }
         if event["type"] == "error" {
             ready = false

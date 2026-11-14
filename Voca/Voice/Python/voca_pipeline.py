@@ -3,7 +3,7 @@ import asyncio
 import json
 from uuid import UUID
 
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import TTSSpeakFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameProcessor
@@ -18,6 +18,10 @@ class NativeSpeechAdapter(FrameProcessor):
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            if frame.finalized:
+                self.emit({'type': 'practiceTurnAccepted', 'requestID': frame.metadata['requestID']})
+            return
         if not isinstance(frame, TTSSpeakFrame):
             await self.push_frame(frame, direction)
             return
@@ -72,6 +76,16 @@ async def serve(native):
             event = json.loads(raw)
             if event['type'] == 'playback':
                 adapter.acknowledge(event)
+            elif event['type'] == 'practiceTurn':
+                request_id = str(UUID(event['requestID']))
+                session_id = str(UUID(event['sessionID']))
+                text = event['text']
+                if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+                    raise ValueError('Invalid practice turn')
+                frame = TranscriptionFrame(text=text, user_id=session_id,
+                                           timestamp=event['timestamp'], finalized=True)
+                frame.metadata['requestID'] = request_id
+                await worker.queue_frame(frame)
             elif event['type'] == 'speech':
                 request_id = str(UUID(event['requestID']))
                 text = event['text']

@@ -76,7 +76,7 @@ and the Xcode workspace's committed `Package.resolved`.
 3. Select glasses as the iPhone audio output, then confirm that route in the app.
    “Speak native test phrase” is a **native audio diagnostic**, not Pipecat proof.
    User confirmed the complete native phrase through the glasses on November 14.
-   Route changes interrupt speech; phone-speaker fallback is not allowed.
+   Route changes interrupt live cue speech; automatic phone-speaker fallback is not allowed. Practice separately uses the output explicitly selected at its start.
    For the next check, press “Start embedded Pipecat,” wait for ready, then
    “Speak test phrase through Pipecat.” Microphone capture remains off.
 4. Enter the band number printed on its bag. Close the laptop dashboard and
@@ -166,7 +166,25 @@ not start merely by opening the app. Advanced controls retain diagnostics.
 Before enabling single-tap cues, complete Setup → Set up single-tap cues. The
 calibration observes single/double event ordering and a quiet interval; pending
 singles are suppressed by double taps and readiness changes. Completed spoken
-cues show explicit feedback in Session and Review. Memory editing and grounded
-audits remain unfinished and are labelled accordingly.
+cues show explicit feedback in Session and Review. Review includes all saved
+cue attempts, delivery state, and editable feedback on completed speech.
+
+Memory saves only explicitly approved personal details. Review → Review this
+conversation accepts an explicitly confirmed real excerpt with speaker identity;
+unknown times stay unknown. Audits wait without wearer evidence, otherwise cite
+source IDs and provide one strength, tentative opportunity, and exercise. Deleting
+an entry removes dependent reviews/history/learning with retry after interrupted
+writes. Historical excerpts never become fresh live dialogue just because saved.
+
+Review → Start spoken practice uses a bundled simulated scenario. Choose the
+current audio output, then Speak my turn → Finish my turn. Recognition
+requires on-device assets; there is no cloud fallback. Interrupt and speak cancels
+and awaits the previous reply. Only fully spoken replies enter practice context.
+This is explicit turn-taking, not passive interruption detection. Practice is
+session-only, separate from personal memories and coaching rewards. Glasses are
+not required for practice; live cues still require the confirmed glasses route.
+
+Motion respects Reduce Motion: startup/request waves are finite, and the guidance
+gradient moves only while displayed in an active app.
 
 See [UI review](docs/ui-review.md) and [Simulator fixtures](docs/ui-preview/README.md).
