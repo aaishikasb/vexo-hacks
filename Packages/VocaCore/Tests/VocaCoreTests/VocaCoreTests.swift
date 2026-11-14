@@ -61,6 +61,28 @@ final class VocaCoreTests: XCTestCase {
         do { try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .completed); XCTFail("unapproved memory source accepted") } catch CoachEngineError.invalidEvidenceReferences {}
     }
 
+    func testExplainCueMustCiteWearerProvidedKnownPoint() async throws {
+        let engine = try CoachEngine(storeURL: tempURL())
+        var missingCitation = makeContext(.live, goal: .explain, dialogue: false, story: false)
+        missingCitation.knownPointSourceID = nil
+        let none = try await engine.selectCue(missingCitation, explore: false, excluding: nil)
+        XCTAssertNil(none)
+
+        var context = missingCitation
+        context.decisionID = UUID()
+        context.knownPointSourceID = "known-point:\(context.decisionID.uuidString)"
+        let decision = try await selected(engine, context)
+        XCTAssertEqual(decision.selectedAction, .explainClearly)
+        let photoOnly = CueResult(decisionID: decision.context.decisionID, actualProfile: context.profile,
+            strategy: .explainClearly, text: "Explain the point you entered clearly.", sourceIDs: [context.scene.requestID.uuidString])
+        do { try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: photoOnly, status: .completed); XCTFail("photo was accepted as source for wearer input") } catch CoachEngineError.invalidEvidenceReferences {}
+        let attributed = CueResult(decisionID: decision.context.decisionID, actualProfile: context.profile,
+            strategy: .explainClearly, text: "Explain the point you entered clearly.", sourceIDs: [context.knownPointSourceID!])
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: attributed, status: .completed)
+        let episodes = await engine.episodes()
+        XCTAssertEqual(episodes.first?.cue?.sourceIDs, [context.knownPointSourceID!])
+    }
+
     func testSignedUpdateNumericFeedbackReplayAndProfileSeparation() async throws {
         let url = tempURL(), profile = VocaFixtures.profile()
         let engine = try CoachEngine(storeURL: url)

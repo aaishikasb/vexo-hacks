@@ -42,7 +42,7 @@ public actor CoachEngine {
 
     public func selectCue(_ context: CueContext, explore: Bool, excluding: Strategy? = nil) throws -> CueDecision? {
         guard !store.episodes.contains(where: { $0.id == context.decisionID }) else { throw CoachEngineError.duplicateDecision }
-        let suppliedEvidenceIDs = Set(context.snapshot.approvedMemories.map(\.sourceID) + context.snapshot.dialogue.map(\.sourceID))
+        let suppliedEvidenceIDs = Set(context.snapshot.approvedMemories.map(\.sourceID) + context.snapshot.dialogue.map(\.sourceID) + [context.knownPointSourceID].compactMap { $0 })
         guard suppliedEvidenceIDs.isDisjoint(with: store.invalidatedSourceIDs) else { throw CoachEngineError.invalidEvidenceReferences }
         let features = Self.features(for: context)
         let fresh = features[9] == 1
@@ -53,7 +53,9 @@ public actor CoachEngine {
             switch action {
             case .followUp, .reflectClarify: return fresh
             case .personalConnection: return story
-            case .explainClearly: return context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            case .explainClearly:
+                return context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+                    context.knownPointSourceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             case .situationalOpener: return sceneUseful && context.goal == .enter
             }
         }
@@ -93,8 +95,15 @@ public actor CoachEngine {
         if let cue {
             guard cue.decisionID == decisionID, cue.actualProfile == episode.decision.context.profile, cue.strategy == episode.decision.selectedAction, !cue.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CoachEngineError.invalidCue }
             let approvedMemorySources = episode.decision.context.snapshot.approvedMemories.filter(\.shareApproved).map(\.sourceID)
-            let allowed = Set(approvedMemorySources + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString])
+            let knownPointSources = episode.decision.context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? [episode.decision.context.knownPointSourceID].compactMap { $0 } : []
+            let allowed = Set(approvedMemorySources + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString] + knownPointSources)
             guard Set(cue.sourceIDs).isSubset(of: allowed) else { throw CoachEngineError.invalidEvidenceReferences }
+            if episode.decision.selectedAction == .explainClearly {
+                guard let sourceID = episode.decision.context.knownPointSourceID, cue.sourceIDs.contains(sourceID) else {
+                    throw CoachEngineError.invalidEvidenceReferences
+                }
+            }
         }
         guard status == .pending || (status == .completed && cue != nil) || status == .failed || status == .cancelled else { throw CoachEngineError.invalidCue }
         let previousStore = store
@@ -105,7 +114,7 @@ public actor CoachEngine {
     public func applyFeedback(_ event: FeedbackEvent) throws {
         guard let i = store.episodes.firstIndex(where: { $0.id == event.decisionID }) else { throw CoachEngineError.unknownDecision }
         var episode = store.episodes[i]
-        let contextSources = Set(episode.decision.context.snapshot.approvedMemories.map(\.sourceID) + episode.decision.context.snapshot.dialogue.map(\.sourceID))
+        let contextSources = Set(episode.decision.context.snapshot.approvedMemories.map(\.sourceID) + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.knownPointSourceID].compactMap { $0 })
         guard contextSources.isDisjoint(with: store.invalidatedSourceIDs), Set(episode.cue?.sourceIDs ?? []).isDisjoint(with: store.invalidatedSourceIDs) else { throw CoachEngineError.invalidFeedback }
         guard episode.delivery == .completed, episode.cue != nil else { throw CoachEngineError.invalidFeedback }
         if let old = episode.feedback {
@@ -126,6 +135,7 @@ public actor CoachEngine {
         store.episodes.removeAll { e in
             e.decision.context.snapshot.approvedMemories.contains(where: { $0.sourceID == sourceID }) ||
             e.decision.context.snapshot.dialogue.contains(where: { $0.sourceID == sourceID }) ||
+            e.decision.context.knownPointSourceID == sourceID ||
             e.cue?.sourceIDs.contains(sourceID) == true
         }
         do { try persist() } catch { store = previousStore; throw error }
