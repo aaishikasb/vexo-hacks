@@ -1,12 +1,15 @@
 # Machine 2 handoff — Core and coaching content
 
+Ready implementation commit: `a0643034e9636f92ecb0b4d5b6fe85f861b03a04`.
+
 ## Ready changes
 
 - Foundation-only Swift package at `Packages/VocaCore` with canonical public contracts, `ModelGenerating`, `VoiceCoordinating`, content models, and a serialized `CoachEngine` actor.
 - `CoachEngine` freezes the canonical ten features and eligibility at selection; keys LinUCB history by model ID, artifact SHA-256, prompt version, and mode; persists pending decisions and cue/delivery/feedback atomically; enforces immutable terminal delivery; and replays corrected feedback in only the affected namespace.
 - Evidence deletion API: `deleteEvidence(sourceID:)` (with `invalidateEvidence(sourceID:)` as a compatibility spelling). It removes complete affected episodes so transcript/memory text and their cue/reward derivations disappear from persisted history, replays remaining policy state, and blocks stale snapshots from reusing that source ID.
 - Labelled synthetic fixtures in `VocaFixtures` cover unknown speaker, stale/gapped dialogue, duplicate tap IDs, and interrupted delivery.
-- Compact coaching catalog and three simulated practice scenarios are in the owned `Resources/` directories. `CoachingContent.decode(cards:scenarios:)` checks unique IDs, HTTPS source links, and scenario principle references.
+- Nine original coaching cards cover all nine requested books, and three simulated practice scenarios are in the owned `Resources/` directories. The source links point to public author, publisher, or book listing pages. `CoachingContent.decode(cards:scenarios:)` checks unique IDs, HTTPS source links, and scenario principle references.
+- Cue source validation accepts only share-approved memory IDs, available dialogue IDs, and the scene request ID. Fresh dialogue can be any nonempty attributed speaker; missing/unknown/undiarized speakers and missing timestamps are excluded. Repeated decision UUIDs are rejected before selection is persisted.
 
 ## Public integration signatures
 
@@ -37,10 +40,10 @@ Run:
 swift test --package-path Packages/VocaCore
 ```
 
-The suite checks feature order, unavailable/disabled masks, no eligible action, alternative exclusion, the signed four-active-feature `+0.8` utility update, correction/replay, E4B/E2B and live/practice separation, persistence/relaunch, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
+**Verified:** `swift test --package-path Packages/VocaCore` passed: 10 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, signed four-active-feature `+0.8` update, correction/replay, E4B/E2B and live/practice separation, persistence/relaunch, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
 
 ## Limitations
 
-- Fresh dialogue uses an engineering threshold of 30 seconds and requires a nonempty utterance timestamp plus `speaker == "wearer"`; this is a Core policy convention, not a Vexo guarantee.
+- Fresh dialogue uses an engineering threshold of 30 seconds and requires a nonempty utterance timestamp and an attributed speaker label. This is a Core policy convention, not a Vexo guarantee.
 - Atomic JSON writes are local persistence, not encrypted storage. The app owner must protect the store and delete it with associated private data.
 - No device, Vexo BLE, model inference, native speech, or Pipecat behavior was exercised here.
