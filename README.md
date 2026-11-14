@@ -114,3 +114,13 @@ No five-second latency, thermal, memory, locked-phone, route-loss, or long-term
 learning measurements have been made.
 
 See [device handoff](docs/handoff-device.md) for exact checks and blockers.
+
+Large-model hash memory regression (Mac, using the downloaded E4B file):
+
+```sh
+swiftc -parse-as-library Voca/Inference/ModelArtifact.swift scripts/check_model_hash.swift -o /tmp/voca-hash-check
+/tmp/voca-hash-check .local/models/gemma-4-E4B-it.litertlm 0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0
+```
+
+Physical E4B text check passed: load 11.18 s, first generation 3.41 s, second
+2.00 s. Full photo-to-speech latency and thermal behavior remain unmeasured.

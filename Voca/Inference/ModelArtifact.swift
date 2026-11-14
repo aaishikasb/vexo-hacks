@@ -38,7 +38,8 @@ nonisolated struct ModelArtifact: Codable, Sendable, Equatable {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var digest = SHA256()
-        while let block = try handle.read(upToCount: 1024 * 1024), !block.isEmpty {
+        // Drain Foundation autoreleased read buffers on each chunk, not after gigabytes.
+        while let block = try autoreleasepool(invoking: { try handle.read(upToCount: 1024 * 1024) }), !block.isEmpty {
             try Task.checkCancellation()
             digest.update(data: block)
         }

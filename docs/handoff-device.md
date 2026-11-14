@@ -228,3 +228,27 @@ Fresh validation: Core 10 tests, device/cue 14 tests, Pipecat host 2 tests; all
 passed. Regenerated project; unsigned generic-iOS Voca build succeeded. These
 are host/build results: the full photo-to-Gemma-to-glasses loop, rendered UI,
 and device interruption behavior remain to be verified on hardware.
+
+### E4B device check passed
+
+On the physical iPhone, generic E4B SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`
+imported and loaded successfully. DEBUG check reported load 11.1769 s, first
+validated text generation 3.4065 s, second 2.0031 s. These are text-only check
+measurements, not photo-to-speech latency or sustained thermal results. Only E4B
+was loaded; E2B is staged but not loaded/tested yet. Real photo-to-cue listening
+check is pending user confirmation.
+
+Import investigation found FileHandle read buffers accumulating in Foundation's
+autorelease pool: the 3.66 GB E4B hash consumed ~3.68 GB peak footprint on Mac.
+Draining the pool per chunk preserved the published digest and reduced measured
+peak resident memory to 5,373,952 bytes. `scripts/check_model_hash.swift` asserts
+matching SHA and a 256 MB peak-resident ceiling against a large supplied model.
+
+A separate Voca crash identified a MainActor-inherited Speech authorization
+callback executing on a background queue. Explicit Sendable callbacks and
+start/cancellation fencing corrected it. The physical phone's --speech-check
+returned passed=true after start/stop with no PCM or microphone capture. This
+proves the callback path and on-device recognizer availability check, not actual
+band transcription. Updated checks: 10 Core tests and 14 app/band fixtures pass;
+signed integrated iPhone build passes.
