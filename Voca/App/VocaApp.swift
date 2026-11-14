@@ -167,9 +167,22 @@ struct SetupView: View {
         }
         .disabled(checkingModel)
         .task {
+            do { try camera.configure() } catch { operation.error = error.localizedDescription }
             await coaching.configure()
             expectedSHA256 = ModelLibrary.catalog.first(where: { $0.modelID == selectedModel })?.sha256 ?? ""
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--scene-check") {
+                checkingModel = true
+                UIApplication.shared.isIdleTimerDisabled = true
+                pipecat.start(audio: audio)
+                for _ in 0..<100 {
+                    if pipecat.ready { break }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                await models.checkSceneOnDevice(camera: camera, pipecatReady: pipecat.ready)
+                UIApplication.shared.isIdleTimerDisabled = false
+                checkingModel = false
+            }
             if ProcessInfo.processInfo.arguments.contains("--speech-check") {
                 let transcriber = LocalTranscriber()
                 var result: [String: Any] = ["passed": false]

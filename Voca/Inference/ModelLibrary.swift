@@ -49,6 +49,63 @@ import VocaCore
 
 #if DEBUG
 extension ModelLibrary {
+    func checkSceneOnDevice(camera: GlassesCamera, pipecatReady: Bool) async {
+        var result: [String: Any] = ["passed": false, "stage": "loading", "visionBackend": "metal", "pipecatReady": pipecatReady]
+        func report() {
+            if let data = try? JSONSerialization.data(withJSONObject: result) {
+                try? data.write(to: URL.documentsDirectory.appending(path: "scene-check.json"), options: .atomic)
+            }
+        }
+        report()
+        defer { camera.stop() }
+        do {
+            try camera.configure()
+            try await load(modelID: "gemma4E4B")
+            result["stage"] = "camera"; report()
+            try await camera.start()
+            for _ in 0..<100 {
+                if camera.ready { break }
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            let (jpeg, _) = try await camera.photo()
+            result["photoBytes"] = jpeg.count
+            result["stage"] = "vision"; report()
+            let profile = try await executor.activeProfile()
+            let request = ModelRequest(requestID: UUID(), kind: .scene, requestedProfile: profile,
+                prompt: CuePipeline.scenePrompt, imageJPEG: jpeg, maxOutputTokens: 256,
+                responseSchemaJSON: CuePipeline.sceneSchema)
+            let began = Date()
+            let response = try await executor.generate(request)
+            try response.validate(for: request)
+            let scene = try GeneratedFields.scene(response.text)
+            result["seconds"] = Date().timeIntervalSince(began)
+            result["observationCount"] = scene.observations.count
+            result["stage"] = "textAfterVision"; report()
+            let cueRequest = ModelRequest(requestID: UUID(), kind: .cue, requestedProfile: profile,
+                prompt: "Return only JSON with text and sourceIDs. Text must be exactly: Voca is ready to help you find your own words. sourceIDs must be [\"diagnostic\"].",
+                maxOutputTokens: 128, responseSchemaJSON: CuePipeline.cueSchema)
+            let cueResponse = try await executor.generate(cueRequest)
+            try cueResponse.validate(for: cueRequest)
+            _ = try GeneratedFields.cue(cueResponse.text, allowedSources: ["diagnostic"])
+            result["stage"] = "secondVision"; report()
+            let secondResponse = try await executor.generate(request)
+            try secondResponse.validate(for: request)
+            _ = try GeneratedFields.scene(secondResponse.text)
+            result["stage"] = "fullCuePipeline"; report()
+            let checkStore = URL.temporaryDirectory.appending(path: "cue-check-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: checkStore) }
+            let coach = try CoachEngine(storeURL: checkStore)
+            for index in 0..<3 {
+                result["stage"] = "fullCuePipeline\(index)"; report()
+                let cue = try await CuePipeline(model: executor, coach: coach).prepare(photo: jpeg,
+                    observedAt: Date(), requestedAt: Date(), goal: index == 1 ? .explain : .enter,
+                    knownPoint: index == 1 ? "I am building a local conversation companion." : nil)
+                result["cueWordCount"] = cue.text.split(whereSeparator: \.isWhitespace).count
+            }
+            result["passed"] = true; result["stage"] = "completed"
+        } catch { result["error"] = error.localizedDescription }
+        report()
+    }
     func checkOnDevice(modelID: String) async {
         var result: [String: Any] = ["modelID": modelID, "passed": false]
         func report() {

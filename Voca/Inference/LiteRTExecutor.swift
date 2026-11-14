@@ -1,10 +1,11 @@
 import Foundation
 import LiteRTLM
+import Metal
 import VocaCore
 
 actor LiteRTExecutor: ModelGenerating {
     enum Failure: LocalizedError {
-        case notLoaded, switching, invalidRequest, profileMismatch, outputLimit
+        case notLoaded, switching, invalidRequest, profileMismatch, outputLimit, nativeFailure
         var errorDescription: String? {
             switch self {
             case .notLoaded: "Import and load a model before requesting a cue."
@@ -12,6 +13,7 @@ actor LiteRTExecutor: ModelGenerating {
             case .invalidRequest: "The model request exceeded supported limits."
             case .profileMismatch: "The model changed during this request. Request a new cue."
             case .outputLimit: "The model response was too long. Request a new cue."
+            case .nativeFailure: "On-device inference failed and the model was released. Reload E4B, or select and load E2B before trying again."
             }
         }
     }
@@ -43,12 +45,14 @@ actor LiteRTExecutor: ModelGenerating {
         guard artifact.filename == artifact.sha256 + ".litertlm", try ModelArtifact.hash(url) == artifact.sha256 else {
             throw ModelArtifact.Failure.checksum
         }
-        let config = try EngineConfig(modelPath: url.path, backend: .gpu, visionBackend: .cpu(), maxNumTokens: 4096, cacheDir: URL.cachesDirectory.path)
+        ExperimentalFlags.optIntoExperimentalAPIs()
+        ExperimentalFlags.visualTokenBudget = 280
+        let config = try EngineConfig(modelPath: url.path, backend: .gpu, visionBackend: .gpu, maxNumTokens: 2048, cacheDir: URL.cachesDirectory.path)
         let newEngine = Engine(engineConfig: config)
         try await newEngine.initialize()
         try Task.checkCancellation()
         engine = newEngine
-        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.1")
+        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.4-metal-context2048-vision280")
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         try Task.checkCancellation()
@@ -71,7 +75,32 @@ actor LiteRTExecutor: ModelGenerating {
         activeID = job.request.requestID
         running = Task {
             do { job.result.resume(returning: try await execute(job.request)) }
-            catch { job.result.resume(throwing: error) }
+            catch {
+#if DEBUG
+                let diagnostic: [String: Any] = [
+                    "kind": job.request.kind.rawValue,
+                    "modelID": job.request.requestedProfile.modelID.rawValue,
+                    "promptVersion": job.request.requestedProfile.promptVersion,
+                    "promptBytes": job.request.prompt.utf8.count,
+                    "imageBytes": job.request.imageJPEG?.count ?? 0,
+                    "metalAllocatedBytes": MTLCreateSystemDefaultDevice()?.currentAllocatedSize ?? 0,
+                    "error": error.localizedDescription,
+                    "recordedAt": ISO8601DateFormatter().string(from: Date())
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: diagnostic) {
+                    try? data.write(to: URL.documentsDirectory.appending(path: "inference-failure.json"), options: .atomic)
+                }
+#endif
+                if error is LiteRTLMError {
+                    // A failed native allocation can leave reusable executor state incomplete.
+                    conversation = nil; engine = nil; profile = nil
+                    let pending = queue; queue.removeAll()
+                    for next in pending { next.result.resume(throwing: Failure.notLoaded) }
+                    job.result.resume(throwing: Failure.nativeFailure)
+                } else {
+                    job.result.resume(throwing: error)
+                }
+            }
             cancelled.remove(job.request.requestID)
             conversation = nil; activeID = nil; running = nil
             startNext()
@@ -79,17 +108,18 @@ actor LiteRTExecutor: ModelGenerating {
     }
     private func execute(_ request: ModelRequest) async throws -> ModelResponse {
         guard let engine, let profile else { throw Failure.notLoaded }
-        let config = ConversationConfig(thinkingConfig: ThinkingConfig(enableThinking: false), automaticToolCalling: false, enableResponseFormat: request.responseSchemaJSON != nil)
+        let config = ConversationConfig(thinkingConfig: ThinkingConfig(enableThinking: false), automaticToolCalling: false, enableResponseFormat: false)
         let conversation = try await engine.createConversation(with: config)
         self.conversation = conversation
         guard !cancelled.contains(request.requestID) else { throw CancellationError() }
-        var contents: [Content] = [.text(request.prompt)]
+        // shortcut: Native constrained decoding aborts in llguidance allocation on device; recheck after an SDK fix.
+        let prompt = request.prompt + (request.responseSchemaJSON.map { "\nReturn only JSON matching this schema, without markdown: " + $0 } ?? "")
+        var contents: [Content] = [.text(prompt)]
         if let image = request.imageJPEG { contents.append(.imageData(image)) }
-        let format = try request.responseSchemaJSON.map { try ResponseFormat.json(schema: $0) }
         var text = ""
         var outputExceeded = false
         // Drain the native stream even after cancellation; never reuse its engine early.
-        for try await chunk in conversation.sendMessageStream(Message(contents: contents), maxOutputTokens: request.maxOutputTokens, thinkingConfig: ThinkingConfig(enableThinking: false), responseFormat: format) {
+        for try await chunk in conversation.sendMessageStream(Message(contents: contents), maxOutputTokens: request.maxOutputTokens, thinkingConfig: ThinkingConfig(enableThinking: false), responseFormat: nil) {
             if cancelled.contains(request.requestID) || outputExceeded { continue }
             text += chunk.toString
             if text.utf8.count > 12_000 { outputExceeded = true; try conversation.cancel() }

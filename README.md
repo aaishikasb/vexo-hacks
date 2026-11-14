@@ -108,8 +108,12 @@ The pinned Pipecat reference includes its modified mobile fork. The app now
 bundles its Python runtime and a custom speech-only FrameProcessor adapter;
 Swift acknowledges full native playback before Pipecat reports completion.
 Host checks: `PYTHONPATH=Voca/Voice/Python:.build/pipecat-ios/pipecat/src .build/pipecat-ios/.venv/bin/python -m unittest discover -s Tests/VoiceTests`.
-No claim is made yet that Gemma produces cues, feedback trains policy, or
-audits/practice work. See the handoff for physical Pipecat results.
+On-device checks have produced validated Gemma scene facts and cues with Pipecat
+loaded. Interactive delivery still has intermittent native allocation failures;
+the current mitigation caps context at 2,048 and visual tokens at 280 and releases
+the engine after native errors. Reload E4B or explicitly select E2B to recover.
+Feedback learning and audits/practice are not yet demonstrated end to end.
+See the handoff for exact physical-device results.
 No five-second latency, thermal, memory, locked-phone, route-loss, or long-term
 learning measurements have been made.
 

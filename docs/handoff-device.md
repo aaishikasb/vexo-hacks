@@ -280,3 +280,34 @@ corrected replay after relaunch; 15 device/pipeline tests, including two Explain
 citation cases; unsigned generic-iOS Voca build succeeded. Device runtime and
 spoken Explain behavior were not exercised in this checkpoint. Concurrent
 local inference/diagnostic edits remain uncommitted.
+
+### Repeated-photo and full-cue diagnostic
+
+User reported native NOT_FOUND `No per layer embeddings found in inputs`.
+This remains unreproduced in the expanded physical-device `--scene-check`:
+first image, text-only request, repeated image, and the actual Core-backed
+CuePipeline all passed on the same E4B engine (12-word validated cue). The check
+uses a temporary episode store and never marks delivery complete or rewards it.
+No photo/cue text is exported. This does not establish reliable interactive
+playback. DEBUG inference failures now export only job kind, profile, byte
+counts, timestamp, and native error to `Documents/inference-failure.json` to
+identify the failing interactive stage without saving private request content.
+
+### Metal allocation recovery and bounded runtime
+
+Retrieved user failure: E4B text cue, 1,395 prompt bytes, no image, native
+`Failed to allocate id<MTLBuffer>`. The expanded device check now starts Pipecat,
+then runs repeated vision/text and three actual Core-backed Enter/Explain cue
+requests. At context 2,048 with unbounded default visual tokens it reproduced
+a later scene allocation failure with Metal currentAllocatedSize 3,451,060,224
+bytes. Native errors now release conversation/engine/profile, fail queued jobs,
+and require explicit reload or E2B selection rather than reuse failed state.
+
+Set context to 2,048 and the SDK experimental visual-token budget to 280 before
+engine initialization. Profile namespace `voca-v2.4-metal-context2048-vision280`.
+This bounded configuration passed the same physical-device sequence with
+Pipecat ready: real JPEG 406,287 bytes, five valid observations, first scene
+3.6821 s, final valid cue 12 words. Signed build and 15 host fixture tests pass.
+This is a provisional mitigation: intermittent reliability, sustained memory,
+and full interactive speech delivery remain unproven. No automatic fallback,
+cloud inference, microphone capture, or reward was introduced by these checks.
