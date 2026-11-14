@@ -83,6 +83,24 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(episodes.first?.cue?.sourceIDs, [context.knownPointSourceID!])
     }
 
+    func testPendingCuePersistsAndRecoveryCancellationRetainsItWithoutReward() async throws {
+        let url = tempURL(), engine = try CoachEngine(storeURL: url), context = makeContext()
+        let decision = try await selected(engine, context)
+        let cue = CueResult(decisionID: decision.context.decisionID, actualProfile: decision.context.profile,
+            strategy: decision.selectedAction, text: "A grounded cue survives a relaunch.",
+            sourceIDs: decision.context.snapshot.dialogue.map(\.sourceID))
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .pending)
+        try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .pending)
+        let relaunched = try CoachEngine(storeURL: url)
+        try await relaunched.recordDelivery(decisionID: decision.context.decisionID, cue: nil, status: .cancelled)
+        try await relaunched.recordDelivery(decisionID: decision.context.decisionID, cue: nil, status: .cancelled)
+        let persistedEpisodes = await relaunched.episodes()
+        let episode = try XCTUnwrap(persistedEpisodes.first)
+        XCTAssertEqual(episode.cue, cue)
+        XCTAssertEqual(episode.delivery, .cancelled)
+        do { try await relaunched.applyFeedback(FeedbackEvent(decisionID: decision.context.decisionID, verdict: .helpful, revision: 1)); XCTFail("recovered interrupted cue trained") } catch CoachEngineError.invalidFeedback {}
+    }
+
     func testSignedUpdateNumericFeedbackReplayAndProfileSeparation() async throws {
         let url = tempURL(), profile = VocaFixtures.profile()
         let engine = try CoachEngine(storeURL: url)
