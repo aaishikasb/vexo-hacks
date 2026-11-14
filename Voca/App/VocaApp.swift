@@ -133,7 +133,7 @@ struct SetupView: View {
                         }
                         Text(coaching.status)
                         Button("Request a spoken cue") {
-                            coaching.request(model: models.executor, camera: camera, voice: pipecat)
+                            coaching.request(models: models, camera: camera, voice: pipecat)
                         }.disabled(coaching.busy || !camera.ready || !pipecat.ready)
                         Button("Cancel cue") {
                             Task { await coaching.stop(voice: pipecat, executor: models.executor) }
@@ -141,6 +141,7 @@ struct SetupView: View {
                         if let episode = coaching.episodes.last, let cue = episode.cue {
                             Text(cue.text).font(.headline)
                             Text("Delivery: \(episode.delivery.rawValue)").font(.caption)
+                            Text(cue.actualProfile.modelID == .gemma4E2B ? "Model: E2B fallback" : "Model: E4B").font(.caption)
                             if episode.delivery == .completed {
                                 ForEach([FeedbackVerdict.helpful, .unhelpful, .notTried], id: \.self) { verdict in
                                     Button(verdict == .helpful ? "Helpful" : verdict == .unhelpful ? "Unhelpful" : "Not tried") {

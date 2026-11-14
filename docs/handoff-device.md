@@ -376,3 +376,33 @@ the physical fallback photo → E2B → Pipecat/native playback path on build
 `e50c472`, in addition to the two ten-cue device generation runs. Long-duration
 stability, cancellation under load, and active-work model switching remain
 unverified. No feedback verdict was inferred from successful playback.
+
+### E4B remains primary: actual native-failure recovery verified
+
+User reported E4B still failed after complete-response changes. Latest native
+log confirmed status 5 / NOT_FOUND / `No per-layer embeddings found in inputs`
+at llm_litert_compiled_model_executor.cc:770. Thus streaming callback overlap was
+not established as the root cause and complete-response alone was insufficient.
+Expanded the harness: warm E2B, switch in-process to E4B, capture a new glasses
+photo per cue. This reproduced a native failure at the first full pipeline;
+fresh-process E4B with changing photos separately passed ten cues.
+
+Added one bounded E4B-native-error recovery: after the failed request unwinds,
+release its conversation and engine, initialize the same verified artifact and
+config, and retry the same unspoken request under its original profile once.
+Cancellation suppresses the retry. Only one native engine is retained. After
+that retry fails, the app visibly loads E2B and creates a NEW cue pipeline and
+Core decision; failed E4B episodes stay failed and E2B results carry E2B profile.
+The delivered cue explicitly displays its model. No validation failures trigger
+this native recovery/fallback and no reward is inferred.
+
+Physical regression: `--scene-check --switch-from-e2b`, Pipecat loaded,
+10 fresh-photo cue pipelines, 10 validated, zero rejected, **engineRecoveries=1**,
+nativeSequencePassed=true. This exercised recovery from a real native error,
+not a synthetic injection, and completed all jobs on E4B without E2B fallback.
+First scene 4.09967 s; recovery/reload latency was not separately measured.
+Signed app build and 16 host fixtures passed. E4B left loaded for the user.
+
+This is app-level recovery, not proof the underlying SDK defect is removed.
+Double-failure automatic E2B fallback and cancellation during reload still need
+physical verification; recovery adds a model reload to request latency.

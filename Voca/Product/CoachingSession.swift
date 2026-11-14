@@ -28,10 +28,11 @@ import VocaCore
         } catch { status = "Coaching history could not be opened. Your existing data has been preserved." }
     }
 
-    func request(model: any ModelGenerating, camera: GlassesCamera, voice: PipecatSpeech) {
+    func request(models: ModelLibrary, camera: GlassesCamera, voice: PipecatSpeech) {
         guard !busy, let coach else { return }
         guard camera.ready, voice.ready else { status = "Start the glasses camera and embedded Pipecat first."; return }
         busy = true
+        let model = models.executor
         let requestedAt = Date(), goal = self.goal, knownPoint = self.knownPoint
         work = Task {
             var cue: CueResult?
@@ -39,12 +40,23 @@ import VocaCore
                 status = "Capturing context…"
                 let (photo, observedAt) = try await camera.photo()
                 status = "Finding a grounded cue on this iPhone…"
-                cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
-                    requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
+                let requestedProfile = try await model.activeProfile()
+                do {
+                    cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
+                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
+                } catch LiteRTExecutor.Failure.nativeFailure where requestedProfile.modelID == .gemma4E4B {
+                    try Task.checkCancellation()
+                    status = "E4B recovery failed. Loading E2B fallback for this cue…"
+                    try await models.load(modelID: "gemma4E2B")
+                    try Task.checkCancellation()
+                    // A new pipeline decision records E2B's profile; the failed E4B episode stays failed.
+                    cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
+                        requestedAt: requestedAt, goal: goal, knownPoint: knownPoint)
+                }
                 guard let cue else { return }
                 try Task.checkCancellation()
                 try await coach.recordDelivery(decisionID: cue.decisionID, cue: cue, status: .pending)
-                status = "Speaking your cue…"
+                status = cue.actualProfile.modelID == .gemma4E2B ? "Speaking your cue with E2B fallback…" : "Speaking your cue with E4B…"
                 try await voice.speak(cue.text)
                 // A finished native utterance remains completed even if cancellation arrives afterward.
                 try await coach.recordDelivery(decisionID: cue.decisionID, cue: cue, status: .completed)

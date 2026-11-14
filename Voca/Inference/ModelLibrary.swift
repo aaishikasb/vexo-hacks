@@ -78,6 +78,15 @@ extension ModelLibrary {
         do {
             try camera.configure()
             if !artifacts.contains(where: { $0.modelID == modelID }) { try await importStaged(modelID: modelID) }
+            if modelID == "gemma4E4B", ProcessInfo.processInfo.arguments.contains("--switch-from-e2b") {
+                result["stage"] = "warmingE2B"; report()
+                try await load(modelID: "gemma4E2B")
+                let oldProfile = try await executor.activeProfile()
+                let warm = ModelRequest(requestID: UUID(), kind: .cue, requestedProfile: oldProfile,
+                    prompt: "Say ready.", maxOutputTokens: 16)
+                _ = try await executor.generate(warm)
+                result["stage"] = "switchingToE4B"; report()
+            }
             try await load(modelID: modelID)
             result["stage"] = "camera"; report()
             try await camera.start()
@@ -132,8 +141,9 @@ extension ModelLibrary {
             for index in 0..<10 {
                 result["stage"] = "fullCuePipeline\(index)"; report()
                 do {
-                    let cue = try await CuePipeline(model: executor, coach: coach).prepare(photo: jpeg,
-                        observedAt: Date(), requestedAt: Date(), goal: index == 1 ? .explain : .enter,
+                    let (freshJPEG, capturedAt) = try await camera.photo()
+                    let cue = try await CuePipeline(model: executor, coach: coach).prepare(photo: freshJPEG,
+                        observedAt: capturedAt, requestedAt: Date(), goal: index == 1 ? .explain : .enter,
                         knownPoint: index == 1 ? "I am building a local conversation companion." : nil)
                     result["cueWordCount"] = cue.text.split(whereSeparator: \.isWhitespace).count
                     validatedCues += 1
@@ -144,6 +154,7 @@ extension ModelLibrary {
                 result["rejectedCues"] = rejectedCues
                 report()
             }
+            result["engineRecoveries"] = await executor.recoveryCount
             result["nativeSequencePassed"] = true
             result["passed"] = rejectedCues == 0; result["stage"] = "completed"
         } catch { result["error"] = error.localizedDescription }

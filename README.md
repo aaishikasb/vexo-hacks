@@ -111,7 +111,9 @@ Host checks: `PYTHONPATH=Voca/Voice/Python:.build/pipecat-ios/pipecat/src .build
 The complete-response LiteRT adapter passed ten repeated photo/cue pipelines each
 with E4B and E2B on the phone while Pipecat was loaded, with all cues validated.
 Context is capped at 2,048 and visual tokens at 280. Native errors release the
-engine; reload E4B or explicitly select E2B to recover. Loading a staged official
+engine. E4B remains primary: a native failure gets one fresh-E4B-engine retry;
+if that also fails, the app visibly loads E2B and creates a separately attributed
+cue decision. Loading a staged official
 artifact imports it with SHA-256 verification automatically. These bounded runs
 do not establish long-duration or thermal reliability.
 Feedback learning and audits/practice are not yet demonstrated end to end.

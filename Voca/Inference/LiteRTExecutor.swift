@@ -22,6 +22,8 @@ actor LiteRTExecutor: ModelGenerating {
         let result: CheckedContinuation<ModelResponse, Error>
     }
     private var engine: Engine?
+    private var engineConfig: EngineConfig?
+    private(set) var recoveryCount = 0
     private var profile: ModelProfile?
     private var queue: [Job] = []
     private var running: Task<Void, Never>?
@@ -39,7 +41,7 @@ actor LiteRTExecutor: ModelGenerating {
         switching = true
         defer { switching = false }
         await cancelAll()
-        engine = nil; profile = nil
+        engine = nil; profile = nil; engineConfig = nil
         guard let modelID = ModelID(rawValue: artifact.modelID) else { throw Failure.invalidRequest }
         let url = ModelArtifact.directory.appending(path: artifact.filename)
         guard artifact.filename == artifact.sha256 + ".litertlm", try ModelArtifact.hash(url) == artifact.sha256 else {
@@ -52,6 +54,8 @@ actor LiteRTExecutor: ModelGenerating {
         try await newEngine.initialize()
         try Task.checkCancellation()
         engine = newEngine
+        engineConfig = config
+        recoveryCount = 0
         profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.6-complete-json-instance")
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
@@ -74,7 +78,7 @@ actor LiteRTExecutor: ModelGenerating {
         let job = queue.remove(at: index)
         activeID = job.request.requestID
         running = Task {
-            do { job.result.resume(returning: try await execute(job.request)) }
+            do { job.result.resume(returning: try await executeWithRecovery(job.request)) }
             catch {
 #if DEBUG
                 let diagnostic: [String: Any] = [
@@ -104,6 +108,22 @@ actor LiteRTExecutor: ModelGenerating {
             cancelled.remove(job.request.requestID)
             conversation = nil; activeID = nil; running = nil
             startNext()
+        }
+    }
+    private func executeWithRecovery(_ request: ModelRequest) async throws -> ModelResponse {
+        do { return try await execute(request) }
+        catch {
+            guard !cancelled.contains(request.requestID) else { throw CancellationError() }
+            guard error is LiteRTLMError, request.requestedProfile.modelID == .gemma4E4B,
+                  let config = engineConfig else { throw error }
+            // Generation has no delivery side effect: retry once with the same verified artifact/profile.
+            conversation = nil; engine = nil
+            let replacement = Engine(engineConfig: config)
+            try await replacement.initialize()
+            engine = replacement
+            guard !cancelled.contains(request.requestID) else { throw CancellationError() }
+            recoveryCount += 1
+            return try await execute(request)
         }
     }
     private func execute(_ request: ModelRequest) async throws -> ModelResponse {
