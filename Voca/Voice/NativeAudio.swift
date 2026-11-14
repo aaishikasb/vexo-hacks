@@ -46,7 +46,7 @@ import Synchronization
         try session.setActive(true)
         guard routeIsValid else { throw Failure.route }
     }
-    private var routeIsValid: Bool {
+    var routeIsValid: Bool {
         guard let routeUID else { return false }
         return session.currentRoute.outputs.count == 1 && session.currentRoute.outputs.first?.uid == routeUID
     }
@@ -55,8 +55,7 @@ import Synchronization
         try Task.checkCancellation()
         try activate()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.interrupted }
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        let utterance = makeSpeechUtterance(text)
         self.utterance = utterance
         let id = UUID()
         playbackID = id

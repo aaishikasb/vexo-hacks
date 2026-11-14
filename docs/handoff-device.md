@@ -406,3 +406,52 @@ Signed app build and 16 host fixtures passed. E4B left loaded for the user.
 This is app-level recovery, not proof the underlying SDK defect is removed.
 Double-failure automatic E2B fallback and cancellation during reload still need
 physical verification; recovery adds a model reload to request latency.
+
+
+### Local voice tuning — 2026-11-14
+
+Working-tree change; no ready commit created. SpeechUtterance.swift now prefers
+installed US English Premium, then Enhanced voices, with system US English as
+fallback. Rate is 0.94 times Apple's default; pitch and validated text remain
+unchanged. NativeAudio uses this configuration through the existing Pipecat
+adapter; no contract changes, cloud provider, credentials, or dependencies.
+Project source membership regenerated; Mac fixture target includes the helper.
+
+Checks: `swift test --filter speech` passed both Mac tests (fallback, text/pitch,
+rate, language filtering and available quality selection). Unsigned generic iOS
+build passed using the README command. The installed inventory test exercises
+higher quality selection only when that quality is available on the test host.
+Download an Enhanced/Premium US English voice in iPhone accessibility settings
+before evaluating. New pacing and voice selection have not been auditioned or
+installed on the physical phone; warmth and glasses playback remain unverified.
+
+Physical installation follow-up: signed device build passed, installed over Voca
+on the connected iPhone 18 Pro Max, and launched successfully with devicectl.
+User listening check remains pending; use Setup → Advanced controls → Audio
+route check, confirm glasses, start embedded Pipecat, then speak its test phrase.
+
+
+### Guided interface and band cue gating — 2026-11-14
+
+Replaced the diagnostics-first landing screen with native Session/Review/Memory
+tabs, graphite/pearl semantic colors, accessible wrapping controls, cue feedback,
+a guidance orb, and reduced-motion-aware device connection transitions. Setup
+coordinates existing model/Pipecat services and assigned-band connection, with
+explicit band switching and private audio confirmation. Existing voice tuning
+is included in the integrated build. No shared contracts changed.
+
+Single-tap cue mapping defaults off. New pure Foundation calibration and trigger
+helpers observe event ordering, debounce duplicates, suppress double taps, and
+check readiness at delivery. Eight regression tests cover this behavior.
+
+Checks: signed physical-device build passed; all 26 host fixture tests passed;
+git diff --check passed. Actual SwiftUI rendered with stub dependencies on
+iPhone 17e Simulator at default and Accessibility3 RTL sizes; fixed wordmark
+and goal-label clipping. See ui-review.md and ui-preview/README.md. Installed
+and launched the integrated app on the paired iPhone without starting hardware
+checks. Glasses were charging and were not used.
+
+Remaining: physical tap calibration/tap-to-cue regression, VoiceOver and keyboard
+interaction, maximum Dynamic Type, and voice audition. Audits and Memory editing
+remain unfinished. Simulator fixture screenshots do not demonstrate hardware
+or inference. E4B SDK recovery limitations remain as documented above.

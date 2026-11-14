@@ -8,7 +8,9 @@ import VocaCore
     private(set) var status = "Load a model, start the camera, and confirm your glasses audio output."
     private(set) var episodes: [Episode] = []
     private(set) var busy = false
+    private(set) var lastError: String?
     private var coach: CoachEngine?
+    var isConfigured: Bool { coach != nil }
     private var work: Task<Void, Never>?
 
     func configure() async {
@@ -25,13 +27,14 @@ import VocaCore
             }
             coach = store
             episodes = await store.episodes()
-        } catch { status = "Coaching history could not be opened. Your existing data has been preserved." }
+        } catch { status = "Coaching history could not be opened. Your existing data has been preserved. Restart Voca to retry."; lastError = status }
     }
 
     func request(models: ModelLibrary, camera: GlassesCamera, voice: PipecatSpeech) {
         guard !busy, let coach else { return }
         guard camera.ready, voice.ready else { status = "Start the glasses camera and embedded Pipecat first."; return }
         busy = true
+        lastError = nil
         let model = models.executor
         let requestedAt = Date(), goal = self.goal, knownPoint = self.knownPoint
         work = Task {
@@ -68,6 +71,7 @@ import VocaCore
                     catch { status = "Delivery could not be saved. Feedback is unavailable." }
                 }
                 status = error is CancellationError ? "Cue cancelled." : error.localizedDescription
+                lastError = error is CancellationError ? nil : status
             }
             episodes = await coach.episodes()
             busy = false; work = nil
@@ -88,6 +92,7 @@ import VocaCore
                 revision: (episode.feedback?.revision ?? 0) + 1))
             episodes = await coach.episodes()
             status = "Feedback saved for this cue’s original model and context."
-        } catch { status = "Feedback was not saved: \(error.localizedDescription)" }
+            lastError = nil
+        } catch { status = "Feedback was not saved. Try rating this cue again: \(error.localizedDescription)"; lastError = status }
     }
 }

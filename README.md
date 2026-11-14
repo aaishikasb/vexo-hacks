@@ -50,6 +50,14 @@ swift test
 swift test --package-path Packages/VocaCore
 ```
 
+Speech remains local: embedded Pipecat sends validated text to Apple speech
+synthesis. Voca prefers an installed Premium US English voice, then Enhanced,
+and otherwise uses the system US English voice. Delivery uses a slightly slower
+rate with the voice's natural pitch. For better quality, download a US English
+Enhanced or Premium voice in iPhone Settings → Accessibility → Read & Speak →
+Voices (Spoken Content on older iOS versions). No API key is needed. Voice
+availability and perceived warmth must be checked through the glasses on iPhone.
+
 The SDK has arm64 Simulator binaries; x86_64 Simulator is excluded. The new
 Python packaging currently prepares only the physical iPhone extension; repeat
 Simulator builds require adding and verifying the simulator cross-build first. Dependency
@@ -145,3 +153,20 @@ Physical-device feedback persisted across relaunch. Canonical Core replay on
 copies showed the latest genuine Helpful rating increasing the same-context
 strategy utility from 0.75 to 0.8571. Only one strategy was eligible in this check;
 it does not demonstrate a changed selection among competing strategies.
+
+
+### Guided session interface
+
+Session → Prepare session starts embedded Pipecat, loads E4B when no model is
+active, and connects the saved assigned band (18 by default). Setup offers an
+explicit band-number change, Meta registration/camera controls, audio output
+selection, and required glasses-output confirmation. Camera and microphone do
+not start merely by opening the app. Advanced controls retain diagnostics.
+
+Before enabling single-tap cues, complete Setup → Set up single-tap cues. The
+calibration observes single/double event ordering and a quiet interval; pending
+singles are suppressed by double taps and readiness changes. Completed spoken
+cues show explicit feedback in Session and Review. Memory editing and grounded
+audits remain unfinished and are labelled accordingly.
+
+See [UI review](docs/ui-review.md) and [Simulator fixtures](docs/ui-preview/README.md).

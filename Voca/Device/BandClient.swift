@@ -6,13 +6,11 @@ import Observation
     private(set) var status = "Not connected"
     private(set) var info: BandProtocol.Info?
     private(set) var lastEvent = "No tap received"
-    var onSingleTap: (() -> Void)?
+    var onTap: ((UInt32, UInt8) -> Void)?
     var onAudio: ((Data, BandAudioTimeline.Packet) -> Void)?
     var onAudioGap: (() -> Void)?
     var onListeningEnded: ((String) -> Void)?
     private(set) var taps = BandTapHistory()
-    // Enable only after the assigned band's single/double detector timing is verified.
-    var tapMappingVerified = false
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var rx: CBCharacteristic?
@@ -171,7 +169,7 @@ import Observation
             guard info != nil, code == 1 || code == 2 else { return }
             lastEvent = "\(code == 1 ? "Single" : "Double") tap at band time \(time) ms"
             let fresh = taps.record(milliseconds: time, code: code, receivedAt: Date())
-            if fresh, code == 1, tapMappingVerified { onSingleTap?() }
+            if fresh { onTap?(time, code) }
         case let .audio(seq, opus):
             guard listening, let packet = timeline.accept(sequence: seq, receivedAt: Date()) else { return }
             if packet.missingPackets > 0 { onAudioGap?() }
@@ -214,7 +212,7 @@ import Observation
         scanTimeout?.cancel()
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral = nil; rx = nil; tx = nil; info = nil; assignedNumber = nil
-        listening = false; verified = false; tapMappingVerified = false
+        listening = false; verified = false
         if let pending {
             self.pending = nil
             pending.timeout.cancel()
