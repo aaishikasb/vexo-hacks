@@ -51,10 +51,12 @@ public actor FixtureVoiceCoordinator: VoiceCoordinating {
 
 /// Reference-safe JSON resource decoder for card/scenario data.
 public enum CoachingContent {
+    public static let simulatedPartnerLabel = "SIMULATED PARTNER:"
     public static func decode(cards cardData: Data, scenarios scenarioData: Data) throws -> (cards: [CoachingCard], scenarios: [PracticeScenario]) {
         let cards = try JSONDecoder().decode([CoachingCard].self, from: cardData)
         let scenarios = try JSONDecoder().decode([PracticeScenario].self, from: scenarioData)
         let ids = Set(cards.map(\.id))
+        guard scenarios.allSatisfy({ $0.partnerInstructions.hasPrefix(simulatedPartnerLabel) }) else { throw ContentError.missingSimulatedLabel }
         guard ids.count == cards.count, Set(scenarios.map(\.id)).count == scenarios.count,
               scenarios.allSatisfy({ !$0.principleIDs.isEmpty && $0.principleIDs.allSatisfy(ids.contains) }),
               cards.allSatisfy({ URL(string: $0.sourceURL)?.scheme == "https" && !$0.principle.isEmpty && !$0.exercise.isEmpty }) else {
@@ -63,4 +65,4 @@ public enum CoachingContent {
         return (cards, scenarios)
     }
 }
-public enum ContentError: Error { case invalidReferences }
+public enum ContentError: Error { case invalidReferences, missingSimulatedLabel }

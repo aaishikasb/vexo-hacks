@@ -218,6 +218,30 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(Set(decoded.cards.map(\.bookTitle)), Set(["The Communication Book", "The Art of Witty Banter", "How to Listen with Intention", "Thanks for the Feedback", "The Decision Book", "Show Your Work!", "Radical Candor", "Read People Like a Book", "The Well-Spoken Thesaurus"]))
         let invalid = String(decoding: scenarios, as: UTF8.self).replacingOccurrences(of: "listen-then-follow", with: "missing-card")
         XCTAssertThrowsError(try CoachingContent.decode(cards: cards, scenarios: Data(invalid.utf8)))
+        let unlabelled = String(decoding: scenarios, as: UTF8.self).replacingOccurrences(of: "SIMULATED PARTNER: ", with: "PARTNER: ")
+        XCTAssertThrowsError(try CoachingContent.decode(cards: cards, scenarios: Data(unlabelled.utf8))) { XCTAssertTrue($0 is ContentError) }
+    }
+
+    func testAuditReadyRequiresAttributableWearerSourceAndWaitingHasNoClaims() throws {
+        let decisionID = UUID(), profile = VocaFixtures.profile()
+        let wearer = Evidence(sourceID: "wearer-1", text: "I helped organize the garden", speaker: "wearer")
+        let partner = Evidence(sourceID: "partner-1", text: "That sounds interesting", speaker: "partner-1")
+        let valid = AuditReport(decisionID: decisionID, generationProfile: profile, status: .ready,
+            strength: "You described one concrete action.", opportunity: "You could add what you learned.",
+            exercise: "Try the explanation in two sentences.", sourceIDs: [wearer.sourceID], principleID: "clear-one-idea")
+        XCTAssertNoThrow(try AuditReportValidator.validate(valid, decisionID: decisionID,
+            dialogue: [partner, wearer], knownPrincipleIDs: ["clear-one-idea"]))
+
+        var wrongSource = valid; wrongSource.sourceIDs = [partner.sourceID]
+        XCTAssertThrowsError(try AuditReportValidator.validate(wrongSource, decisionID: decisionID,
+            dialogue: [partner, wearer], knownPrincipleIDs: ["clear-one-idea"])) { XCTAssertEqual($0 as? AuditValidationError, .invalidSourceReferences) }
+        XCTAssertThrowsError(try AuditReportValidator.validate(valid, decisionID: decisionID,
+            dialogue: [partner], knownPrincipleIDs: ["clear-one-idea"])) { XCTAssertEqual($0 as? AuditValidationError, .noAttributableWearerEvidence) }
+
+        let waiting = AuditReport(decisionID: decisionID, generationProfile: nil, status: .waitingForTranscript)
+        XCTAssertNoThrow(try AuditReportValidator.validate(waiting, decisionID: decisionID, dialogue: [], knownPrincipleIDs: []))
+        var unsupported = waiting; unsupported.opportunity = "Try asking a question."
+        XCTAssertThrowsError(try AuditReportValidator.validate(unsupported, decisionID: decisionID, dialogue: [], knownPrincipleIDs: [])) { XCTAssertEqual($0 as? AuditValidationError, .waitingContainsClaims) }
     }
 
     func testVoiceFixtureInterruptedNeverMeansCompletion() {
