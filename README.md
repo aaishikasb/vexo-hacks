@@ -203,3 +203,7 @@ or restart before retrying E4B. Extended Virtual Addressing cannot be signed
 with the current Personal Team and is not enabled. Details, measurements, and
 reproduction commands: [device handoff](docs/handoff-device.md). Glasses and
 speech were intentionally excluded from this stress test.
+
+Final isolated fallback run: E2B passed all 30 synthetic cases, cancellation,
+and post-cancellation generation. Median/max generation: 0.75/1.28 s. E4B's
+30-case pass and this E2B pass are separate runs; E4B reload remains unresolved.

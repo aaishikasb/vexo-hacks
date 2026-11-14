@@ -614,3 +614,11 @@ for planned/completed counts, failures, load outcomes, and cancellation results.
 Pause other device installs; a replaced app invalidates the full run.
 Final independent signed build passed with derived data at `/tmp/voca-inference-verified`.
 Apple capability reference: https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.kernel.extended-virtual-addressing
+
+Final isolated signed-build device run (23:16 UTC): E2B 30/30 synthetic cases
+validated, zero rejected cases, Pipecat ready. Native cancellation was observed
+and the next generated cue validated. Exact native queue position was not
+instrumented. Load/readiness 2.254 s; generation median/max 0.751/1.280 s.
+The app remains loaded with E2B. E4B 30/30 and E2B 30/30 are separate sustained
+runs; the interrupted combined run and failed E4B return-load are not passes.
+No glasses, microphone, playback, or reward verification was performed here.
