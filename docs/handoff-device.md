@@ -311,3 +311,25 @@ Pipecat ready: real JPEG 406,287 bytes, five valid observations, first scene
 This is a provisional mitigation: intermittent reliability, sustained memory,
 and full interactive speech delivery remain unproven. No automatic fallback,
 cloud inference, microphone capture, or reward was introduced by these checks.
+
+### Genuine feedback survives relaunch and changes utility
+
+Physical iPhone: user confirmed complete Enter cue through glasses and applied
+Helpful ratings in the UI. Relaunched Voca with devicectl --terminate-existing;
+all four stored episodes were identical before/after, including feedback IDs,
+verdicts, and revisions. No feedback was fabricated by the agent.
+
+Host verification using the canonical Core implementation on disposable copies
+of that real post-relaunch store: removing only the latest Helpful event gave
+situationalOpener utility 0.75; retaining it gave 0.8571428571428574 for the exact
+original feature vector/profile/mode. Probe decisions and the counterfactual
+never touched the phone. Earlier actual decisions recorded utility 0 then 0.75
+in matching contexts. Only one strategy was eligible, so this demonstrates
+utility learning and persistence, not a change in choice among multiple arms.
+Model weights remain fixed; long-term benefit remains unproven.
+
+Reproducible checker: compile canonical Core sources plus
+`scripts/check_feedback_replay.swift` and pass before/after exported store paths.
+It asserts episode equality and positive utility change, creates only temporary
+probe stores, and removes those stores on completion. Private exports were
+removed after verification; no personal scene/cue text was added to Git.

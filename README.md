@@ -128,3 +128,16 @@ swiftc -parse-as-library Voca/Inference/ModelArtifact.swift scripts/check_model_
 
 Physical E4B text check passed: load 11.18 s, first generation 3.41 s, second
 2.00 s. Full photo-to-speech latency and thermal behavior remain unmeasured.
+
+Feedback replay verification (use private before/after app-store exports, never
+commit them):
+
+```sh
+swiftc -parse-as-library Packages/VocaCore/Sources/VocaCore/*.swift scripts/check_feedback_replay.swift -o /tmp/voca-feedback-check
+/tmp/voca-feedback-check /private/path/before.json /private/path/after-relaunch.json
+```
+
+Physical-device feedback persisted across relaunch. Canonical Core replay on
+copies showed the latest genuine Helpful rating increasing the same-context
+strategy utility from 0.75 to 0.8571. Only one strategy was eligible in this check;
+it does not demonstrate a changed selection among competing strategies.
