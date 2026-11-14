@@ -1,6 +1,6 @@
 # Machine 2 handoff — Core and coaching content
 
-Ready implementation commit: `a9f50a68c298fae1a75aab8bb1351020f6aa455d`.
+Ready implementation commit: `05802b53bddfb8b5f9581059d9277d1d12160938`.
 
 ## Ready changes
 
@@ -45,7 +45,7 @@ Run:
 swift test --package-path Packages/VocaCore
 ```
 
-**Verified:** `swift test --package-path Packages/VocaCore` passed: 11 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, Explain point source attribution, signed four-active-feature `+0.8` update, correction/replay, E4B/E2B and live/practice separation, persistence/relaunch, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
+**Verified:** `swift test --package-path Packages/VocaCore` passed: 12 tests, 0 failures. `git diff --check` passed. Tests include share-unapproved memory source rejection, attributed partner dialogue freshness, duplicate decision ID rejection, Explain point source attribution, signed four-active-feature `+0.8` update, delayed E4B feedback after E2B selection, correction replay across relaunch, live/practice separation, cue attribution, duplicate/conflicting delivery, feedback no-ops, evidence deletion, voice interruption fixtures, and resource references.
 
 ## Limitations
 
