@@ -20,8 +20,8 @@ private actor FixtureModel: ModelGenerating {
         }
         sawPersistedDecision = await coach.episodes().contains { $0.id == request.decisionID && $0.delivery == .pending }
         let context = await coach.episodes().first { $0.id == request.decisionID }?.decision.context
-        let source = fail ? "invented" : (photoOnly ? nil : context?.knownPointSourceID) ?? sceneID!.uuidString
-        if let pointSource = context?.knownPointSourceID { #expect(request.prompt.contains(pointSource)) }
+        let source = fail ? "invented" : (!photoOnly && context?.knownPointSourceID != nil ? "p1" : "s1")
+        if context?.knownPointSourceID != nil { #expect(request.prompt.contains("p1")) }
         return ModelResponse(requestID: request.requestID, actualProfile: profile,
             text: "{\"text\":\"Ask which drink on the menu they would recommend today.\",\"sourceIDs\":[\"\(source)\"]}")
     }
@@ -87,7 +87,7 @@ private actor MemoryCueModel: ModelGenerating {
         if request.kind == .scene {
             text = #"{"setting":"other","observations":[],"uncertain":true}"#
         } else {
-            text = "{\"text\":\"Share how growing tomatoes helped you enjoy gardening this summer.\",\"sourceIDs\":[\"\(useMemory ? "approved-story" : "invented")\"]}"
+            text = "{\"text\":\"Share how growing tomatoes helped you enjoy gardening this summer.\",\"sourceIDs\":[\"\(useMemory ? "m1" : "invented")\"]}"
         }
         return ModelResponse(requestID: request.requestID, actualProfile: profile, text: text)
     }
@@ -109,4 +109,69 @@ private actor MemoryCueModel: ModelGenerating {
             try await pipeline.prepare(photo: Data([1]), observedAt: Date(), requestedAt: Date(), goal: .deepen, knownPoint: nil, snapshot: snapshot)
         }
     }
+}
+
+private actor ScopedEvidenceModel: ModelGenerating {
+    let profile = ModelProfile(modelID: .gemma4E2B, artifactSHA256: "scoped-fixture", promptVersion: "scoped-fixture")
+    let sources: [String]
+    private(set) var prompts: [String] = []
+    init(sources: [String]) { self.sources = sources }
+    func activeProfile() -> ModelProfile { profile }
+    func generate(_ request: ModelRequest) throws -> ModelResponse {
+        prompts.append(request.prompt)
+        let ids = String(decoding: try JSONEncoder().encode(sources), as: UTF8.self)
+        return ModelResponse(requestID: request.requestID, actualProfile: profile,
+            text: "{\"text\":\"Ask which part of the event they enjoyed most today.\",\"sourceIDs\":\(ids)}")
+    }
+}
+
+@Test(arguments: [Goal.enter, Goal.explain])
+func cuePromptIncludesOnlySelectedStrategyEvidence(goal: Goal) async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+    let now = Date()
+    let scene = SceneFacts(requestID: UUID(), observedAt: now, setting: .event,
+        observations: ["UNIQUE_SCENE_A stage with a microphone"], uncertain: false)
+    let snapshot = MemorySnapshot(approvedMemories: [Evidence(sourceID: "canonical-memory",
+        text: "UNIQUE_MEMORY_I grow tomatoes", speaker: "wearer", utteredAt: nil, shareApproved: true)],
+        dialogue: [Evidence(sourceID: "canonical-dialogue", text: "UNIQUE_DIALOGUE_I enjoy gardening",
+            speaker: "partner", utteredAt: now, shareApproved: false)], fetchedAt: now, coverage: .complete)
+    let point = "UNIQUE_POINT_Explain my solar project"
+    let model = ScopedEvidenceModel(sources: [goal == .enter ? "s1" : "p1"])
+    let cue = try await CuePipeline(model: model, coach: coach).prepare(scene: scene,
+        requestedAt: now, goal: goal, knownPoint: point, snapshot: snapshot)
+    let prompt = try #require(await model.prompts.first)
+    #expect(!prompt.contains("UNIQUE_MEMORY_"))
+    #expect(!prompt.contains("UNIQUE_DIALOGUE_"))
+    #expect(prompt.contains("UNIQUE_SCENE_") == (goal == .enter))
+    #expect(prompt.contains("UNIQUE_POINT_") == (goal == .explain))
+    #expect(cue.strategy == (goal == .enter ? .situationalOpener : .explainClearly))
+    let episode = try #require(await coach.episodes().first)
+    // Prompt scoping must not change the frozen decision evidence or canonical IDs.
+    #expect(episode.decision.context.snapshot == snapshot)
+    #expect(episode.decision.context.knownPoint == point)
+    #expect(cue.sourceIDs == [goal == .enter ? scene.requestID.uuidString : "user-input:\(cue.decisionID.uuidString)"])
+}
+
+@Test(arguments: [Goal.enter, Goal.explain])
+func cueRejectsUnrelatedMemoryEvenAlongsideRequiredSource(goal: Goal) async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
+    let now = Date()
+    let scene = SceneFacts(requestID: UUID(), observedAt: now, setting: .event,
+        observations: ["A microphone is visible"], uncertain: false)
+    let snapshot = MemorySnapshot(approvedMemories: [Evidence(sourceID: "canonical-memory",
+        text: "I grow tomatoes", speaker: "wearer", utteredAt: nil, shareApproved: true)],
+        dialogue: [], fetchedAt: now, coverage: .complete)
+    let model = ScopedEvidenceModel(sources: [goal == .enter ? "s1" : "p1", "m1"])
+    await #expect(throws: GeneratedFields.Failure.evidence) {
+        try await CuePipeline(model: model, coach: coach).prepare(scene: scene,
+            requestedAt: now, goal: goal, knownPoint: "Explain my solar project", snapshot: snapshot)
+    }
+    #expect(await model.prompts.count == 3)
+    let episode = try #require(await coach.episodes().first)
+    #expect(episode.delivery == .failed)
+    #expect(episode.cue == nil)
 }

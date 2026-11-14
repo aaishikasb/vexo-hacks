@@ -194,6 +194,14 @@ struct SetupView: View {
                 UIApplication.shared.isIdleTimerDisabled = false
                 checkingModel = false
             }
+            if ProcessInfo.processInfo.arguments.contains("--inference-stress-check") {
+                checkingModel = true
+                UIApplication.shared.isIdleTimerDisabled = true
+                await InferenceStressCheck.run(models: models, voice: pipecat, audio: audio)
+                UIApplication.shared.isIdleTimerDisabled = false
+                softwareReady = (try? await models.executor.activeProfile()) != nil
+                checkingModel = false
+            }
             if ProcessInfo.processInfo.arguments.contains("--cue-format-check") {
                 checkingModel = true
                 UIApplication.shared.isIdleTimerDisabled = true
@@ -592,7 +600,14 @@ Form {
         run {
             setupStatus = "Preparing guidance on your iPhone…"
             pipecat.start(audio: audio)
-            if (try? await models.executor.activeProfile()) == nil { try await models.load(modelID: "gemma4E4B") }
+            if (try? await models.executor.activeProfile()) == nil {
+                do { try await models.load(modelID: "gemma4E4B") }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    setupStatus = "E4B could not become ready. Preparing E2B fallback…"
+                    try await models.load(modelID: "gemma4E2B")
+                }
+            }
             for _ in 0..<100 {
                 if pipecat.ready { break }
                 try await Task.sleep(for: .milliseconds(200))

@@ -16,9 +16,21 @@ nonisolated enum GeneratedFields {
     struct Audit: Decodable, Sendable { let strength: String; let opportunity: String; let exercise: String; let sourceIDs: [String]; let principleID: String }
 
     static func decode<T: Decodable>(_ type: T.Type, text: String, keys: Set<String>) throws -> T {
-        guard text.utf8.count <= 12_000, let data = text.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              Set(object.keys) == keys else { throw Failure.fields }
+        guard text.utf8.count <= 12_000 else { throw Failure.fields }
+        var json = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A complete presentation fence is harmless; prose and partial JSON must never be salvaged.
+        if json.hasPrefix("```") {
+            let lines = json.components(separatedBy: .newlines)
+            guard lines.count >= 3, ["```", "```json"].contains(lines[0].lowercased()), lines.last == "```" else {
+                throw Failure.malformed
+            }
+            json = lines.dropFirst().dropLast().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let data = json.data(using: .utf8) else { throw Failure.malformed }
+        let value: Any
+        do { value = try JSONSerialization.jsonObject(with: data) }
+        catch { throw Failure.malformed }
+        guard let object = value as? [String: Any], Set(object.keys) == keys else { throw Failure.fields }
         do { return try JSONDecoder().decode(type, from: data) }
         catch { throw Failure.fields }
     }
@@ -32,18 +44,19 @@ nonisolated enum GeneratedFields {
     static func scene(_ text: String) throws -> Scene {
         let scene = try decode(Scene.self, text: text, keys: ["setting", "observations", "uncertain"])
         guard ["cafe", "shop", "event", "other"].contains(scene.setting), scene.observations.count <= 5,
-              scene.observations.allSatisfy({ !$0.isEmpty && $0.count <= 180 && clean($0) }) else { throw Failure.fields }
+              scene.observations.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.count <= 180 && clean($0) }) else { throw Failure.fields }
         return scene
     }
     static func audit(_ text: String, allowedSources: Set<String>, principleIDs: Set<String>) throws -> Audit {
         let audit = try decode(Audit.self, text: text, keys: ["strength", "opportunity", "exercise", "sourceIDs", "principleID"])
-        guard [audit.strength, audit.opportunity, audit.exercise].allSatisfy({ !$0.isEmpty && $0.count <= 500 && clean($0) }),
+        guard [audit.strength, audit.opportunity, audit.exercise].allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.count <= 500 && clean($0) }),
               principleIDs.contains(audit.principleID) else { throw Failure.fields }
         try sources(audit.sourceIDs, allowed: allowedSources)
         return audit
     }
     static func sources(_ ids: [String], allowed: Set<String>) throws {
-        guard !ids.isEmpty, ids.count <= 12, Set(ids).count == ids.count, Set(ids).isSubset(of: allowed) else { throw Failure.evidence }
+        guard !ids.isEmpty, ids.count <= 12, Set(ids).count == ids.count,
+              ids.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }), Set(ids).isSubset(of: allowed) else { throw Failure.evidence }
     }
     private static func clean(_ text: String) -> Bool {
         !text.contains("```") && !text.contains("<|") && !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })

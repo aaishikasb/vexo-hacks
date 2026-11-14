@@ -31,6 +31,7 @@ actor LiteRTExecutor: ModelGenerating {
     private var conversation: Conversation?
     private var cancelled = Set<UUID>()
     private var switching = false
+    private var draining = false
 
     func activeProfile() throws -> ModelProfile {
         guard !switching, let profile else { throw Failure.notLoaded }
@@ -41,7 +42,10 @@ actor LiteRTExecutor: ModelGenerating {
         switching = true
         defer { switching = false }
         await cancelAll()
-        engine = nil; profile = nil; engineConfig = nil
+        recordLoadMemory(stage: "beforeRelease", modelID: artifact.modelID)
+        releaseNativeEngine()
+        recordLoadMemory(stage: "afterRelease", modelID: artifact.modelID)
+        profile = nil; engineConfig = nil
         guard let modelID = ModelID(rawValue: artifact.modelID) else { throw Failure.invalidRequest }
         let url = ModelArtifact.directory.appending(path: artifact.filename)
         guard artifact.filename == artifact.sha256 + ".litertlm", try ModelArtifact.hash(url) == artifact.sha256 else {
@@ -50,23 +54,41 @@ actor LiteRTExecutor: ModelGenerating {
         ExperimentalFlags.optIntoExperimentalAPIs()
         ExperimentalFlags.visualTokenBudget = 280
         let config = try EngineConfig(modelPath: url.path, backend: .gpu, visionBackend: .gpu, maxNumTokens: 2048, cacheDir: URL.cachesDirectory.path)
-        let newEngine = Engine(engineConfig: config)
-        try await newEngine.initialize()
-        try Task.checkCancellation()
-        engine = newEngine
+        // Keep engine ownership here so a failed readiness probe can release it before recovery.
+        do {
+            engine = Engine(engineConfig: config)
+            try await engine!.initializeDrainingTemporaries()
+            recordLoadMemory(stage: "initialized", modelID: artifact.modelID)
+        } catch {
+            releaseNativeEngine()
+            recordLoadMemory(stage: "initializeFailed", modelID: artifact.modelID, error: error)
+            throw error
+        }
         engineConfig = config
         recoveryCount = 0
-        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.8-source-bound-cues")
+        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v2.9-short-evidence-validated")
+        do {
+            try Task.checkCancellation()
+            let probe = ModelRequest(requestID: UUID(), kind: .cue, requestedProfile: profile!,
+                prompt: "Reply with the single word ready.", maxOutputTokens: 8)
+            _ = try await executeWithRecovery(probe)
+            autoreleasepool { conversation = nil }
+            try Task.checkCancellation()
+        } catch {
+            releaseNativeEngine(); profile = nil; engineConfig = nil
+            throw error
+        }
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         try Task.checkCancellation()
-        guard !switching else { throw Failure.switching }
+        guard !switching, !draining else { throw Failure.switching }
         guard let profile, engine != nil else { throw Failure.notLoaded }
         guard Self.matches(profile, request.requestedProfile) else { throw Failure.profileMismatch }
         guard request.prompt.utf8.count <= 16_000, (1...512).contains(request.maxOutputTokens),
               (request.imageJPEG?.count ?? 0) <= 12_000_000 else { throw Failure.invalidRequest }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { result in
+                guard !Task.isCancelled else { result.resume(throwing: CancellationError()); return }
                 queue.append(Job(request: request, result: result))
                 startNext()
             }
@@ -97,7 +119,7 @@ actor LiteRTExecutor: ModelGenerating {
 #endif
                 if error is LiteRTLMError {
                     // A failed native allocation can leave reusable executor state incomplete.
-                    conversation = nil; engine = nil; profile = nil
+                    releaseNativeEngine(); profile = nil
                     let pending = queue; queue.removeAll()
                     for next in pending { next.result.resume(throwing: Failure.notLoaded) }
                     job.result.resume(throwing: Failure.nativeFailure)
@@ -106,7 +128,7 @@ actor LiteRTExecutor: ModelGenerating {
                 }
             }
             cancelled.remove(job.request.requestID)
-            conversation = nil; activeID = nil; running = nil
+            autoreleasepool { conversation = nil }; activeID = nil; running = nil
             startNext()
         }
     }
@@ -117,10 +139,9 @@ actor LiteRTExecutor: ModelGenerating {
             guard error is LiteRTLMError, request.requestedProfile.modelID == .gemma4E4B,
                   let config = engineConfig else { throw error }
             // Generation has no delivery side effect: retry once with the same verified artifact/profile.
-            conversation = nil; engine = nil
-            let replacement = Engine(engineConfig: config)
-            try await replacement.initialize()
-            engine = replacement
+            releaseNativeEngine()
+            engine = Engine(engineConfig: config)
+            try await engine!.initializeDrainingTemporaries()
             guard !cancelled.contains(request.requestID) else { throw CancellationError() }
             recoveryCount += 1
             return try await execute(request)
@@ -158,13 +179,44 @@ actor LiteRTExecutor: ModelGenerating {
         }
     }
     func cancelAll() async {
+        if draining { await running?.value; return }
+        draining = true
+        defer { draining = false }
         let queued = queue; queue.removeAll()
         for job in queued { job.result.resume(throwing: CancellationError()) }
         if let activeID { cancel(requestID: activeID) }
         let task = running
         await task?.value
     }
+    private func releaseNativeEngine() {
+        // Conversation retains its Engine; release both inside the same pool.
+        autoreleasepool { conversation = nil; engine = nil }
+    }
+    private func recordLoadMemory(stage: String, modelID: String, error: Error? = nil) {
+#if DEBUG
+        let url = URL.documentsDirectory.appending(path: "model-load-memory.json")
+        var records = (try? Data(contentsOf: url)).flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]]
+        } ?? []
+        var record: [String: Any] = ["stage": stage, "modelID": modelID,
+            "recordedAt": Date().ISO8601Format(),
+            "metalAllocatedBytes": MTLCreateSystemDefaultDevice()?.currentAllocatedSize ?? 0,
+            "thermalState": ProcessInfo.processInfo.thermalState.rawValue]
+        if let error { record["error"] = error.localizedDescription }
+        records.append(record)
+        if let data = try? JSONSerialization.data(withJSONObject: Array(records.suffix(40))) {
+            try? data.write(to: url, options: [.atomic, .completeFileProtection])
+        }
+#endif
+    }
     nonisolated static func matches(_ lhs: ModelProfile, _ rhs: ModelProfile) -> Bool {
         lhs.modelID == rhs.modelID && lhs.artifactSHA256 == rhs.artifactSHA256 && lhs.promptVersion == rhs.promptVersion
+    }
+}
+
+// Engine initialization is synchronous on its own actor; drain native temporaries there.
+private extension Engine {
+    func initializeDrainingTemporaries() throws {
+        try autoreleasepool { try initialize() }
     }
 }

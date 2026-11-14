@@ -57,10 +57,12 @@ import VocaCore
                 do {
                     cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
                         requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
-                } catch LiteRTExecutor.Failure.nativeFailure where requestedProfile.modelID == .gemma4E4B {
-                    await recordFailure("E4B native inference failed after its recovery attempt. Voca attempted E2B fallback.", requestedAt: requestedAt, modelID: .gemma4E4B)
+                } catch {
+                    guard requestedProfile.modelID == .gemma4E4B, Self.canUseFallback(after: error) else { throw error }
                     try Task.checkCancellation()
-                    status = "E4B recovery failed. Loading E2B fallback for this cue…"
+                    await recordFailure("E4B could not produce a valid cue after recovery. Voca attempted E2B fallback. " + error.localizedDescription,
+                        requestedAt: requestedAt, modelID: .gemma4E4B)
+                    status = "E4B could not finish this cue. Loading E2B fallback…"
                     try await models.load(modelID: "gemma4E2B")
                     try Task.checkCancellation()
                     // A new pipeline decision records E2B's profile; the failed E4B episode stays failed.
@@ -88,6 +90,12 @@ import VocaCore
             episodes = await coach.episodes()
             busy = false; work = nil
         }
+    }
+
+    private static func canUseFallback(after error: Error) -> Bool {
+        if error is GeneratedFields.Failure { return true }
+        if let failure = error as? LiteRTExecutor.Failure, case .nativeFailure = failure { return true }
+        return false
     }
 
     private func recordFailure(_ reason: String, requestedAt: Date, modelID: ModelID? = nil) async {

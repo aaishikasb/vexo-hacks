@@ -155,15 +155,14 @@ import VocaCore
                 Simulated transcript: \(String(decoding: data, as: UTF8.self))
                 """, maxOutputTokens: 160,
                     responseSchemaJSON: #"{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}"#)
-                let response = try await model.generate(request)
-                try response.validate(for: request)
-                let text = try PracticeTurnGate.reply(response.text)
+                let generated = try await ValidatedGeneration.run(request, model: model, validate: PracticeTurnGate.reply)
+                let text = generated.value
                 try Task.checkCancellation()
                 guard generation == gate.generation else { return }
                 status = "Speaking the simulated reply…"
                 try await voice.speak(text)
                 guard generation == gate.generation else { return }
-                messages.append(Message(text: text, fromUser: false, profile: response.actualProfile))
+                messages.append(Message(text: text, fromUser: false, profile: generated.profile))
                 status = "Your turn. Tap Speak to continue."
             } catch { if generation == gate.generation { status = error is CancellationError ? "Reply stopped." : error.localizedDescription } }
             if generation == gate.generation { busy = false; work = nil }

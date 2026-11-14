@@ -564,3 +564,53 @@ missing-per-layer-embeddings failure remains unresolved; full fresh-photo to
 spoken-cue fallback requires a device regression. New failed attempts retain
 individual reasons in the protected Coaching/Failures directory and show them
 in history; deleting dependent episodes also removes those diagnostics.
+
+### Structured output and native readiness hardening — 2026-11-14
+
+Cue prompts now expose short request-local evidence aliases and only evidence
+for the selected strategy. A synthetic E2B repro showed it citing an unrelated
+approved pottery memory for Explain or Enter, even after a correction. The
+validator correctly rejected those outputs. Unrelated evidence is now omitted;
+validated aliases map back to the original frozen source IDs. The policy's
+context, profile, features, decision IDs, and reward rules are unchanged.
+
+Shared generation validates request/profile attribution and fields before any
+speech, accepts only a complete outer JSON fence, and retries invalid fields
+at most twice with a fresh request ID. It never salvages partial JSON or repairs
+citations. Cancellation and native failures bypass these validation retries.
+Scene, cue, audit, and practice use this path. E4B exhausted validation/native
+failures can trigger a separately attributed E2B decision. Model loading runs a
+text readiness probe before reporting ready and clears failed native state.
+
+Verification: exact staged inference commit passes 53 Mac fixture tests; the
+integrated working tree including parallel UI/memory work passed 61. Core's
+17 tests pass. Signed physical build/install passes. No real microphone,
+glasses, playback, reward, or personal-history mutation occurs in the synthetic
+stress harness. Its raw failure outputs are synthetic-only DEBUG diagnostics.
+
+Physical sustained run: E4B 30/30 validated, followed by E2B 16/16 validated
+before another chat replaced the installed app. The 60-case run is INTERRUPTED,
+not a pass or a native hang. E4B generation min/median/max 0.870/2.075/5.513 s;
+peak Metal allocation 3,504,586,752 bytes (not total process memory). Thermal
+state rose from nominal to fair. These are generation times, not speech latency.
+
+Remaining native blocker: E4B -> E2B -> E4B reload still fails in LiteRT 0.19.1
+with missing per-layer embeddings or missing tf_lite_prefill_decode. Verified
+hashes are unchanged; GPU allocation drops to ~23 MB between engines. Native
+section mapping failures can surface as missing sections; the exact device
+mmap errno is not captured. A readiness probe catches false-ready engines.
+Apple's Extended Virtual Addressing capability is relevant to large memory
+maps, but Xcode explicitly rejected it for the current Personal Team. The
+unsupported entitlement was removed; no claim that it fixes this device.
+Use E2B after a failure, and restart Voca before retrying primary E4B. Do not
+claim repeated primary reload reliability or a completed fresh-camera/speech
+stress test. No fallback changes model attribution or creates rewards.
+
+Reproduce with the signed DEBUG app:
+`xcrun devicectl device process launch --device <UDID> --terminate-existing com.aaishika.voca --inference-stress-check --sustained`
+Add `--e2b` to isolate the fallback. Without `--sustained`, the test attempts
+10 cases each across E4B -> E2B -> E4B. Inspect Documents/inference-stress-check.json
+for planned/completed counts, failures, load outcomes, and cancellation results.
+Pause other device installs; a replaced app invalidates the full run.
+Final independent signed build passed with derived data at `/tmp/voca-inference-verified`.
+Apple capability reference: https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.kernel.extended-virtual-addressing

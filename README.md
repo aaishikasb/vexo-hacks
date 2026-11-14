@@ -188,3 +188,18 @@ Motion respects Reduce Motion: startup/request waves are finite, and the guidanc
 gradient moves only while displayed in an active app.
 
 See [UI review](docs/ui-review.md) and [Simulator fixtures](docs/ui-preview/README.md).
+
+Latest reliability checks (2026-11-14): cue prompts now limit evidence to the
+selected strategy, preserve canonical source IDs, and retry invalid structured
+output at most twice. Malformed JSON and unsupported citations never reach
+speech. E4B is readiness-tested before showing Ready; exhausted native or
+validation failures can switch to separately attributed E2B output.
+
+The inference change passes 53 isolated host tests and 17 Core tests. The
+integrated working tree passes 61 host tests. Physical synthetic stress passed
+30 E4B cues and 16 E2B cues before a concurrent app install interrupted that run.
+Repeated E4B reload after E2B still has a native model-mapping failure; use E2B,
+or restart before retrying E4B. Extended Virtual Addressing cannot be signed
+with the current Personal Team and is not enabled. Details, measurements, and
+reproduction commands: [device handoff](docs/handoff-device.md). Glasses and
+speech were intentionally excluded from this stress test.

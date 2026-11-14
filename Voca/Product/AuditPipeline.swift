@@ -37,10 +37,11 @@ struct AuditPipeline: Sendable {
         let request = ModelRequest(requestID: UUID(), decisionID: episode.id, kind: .audit,
             requestedProfile: profile, prompt: prompt, maxOutputTokens: 384,
             responseSchemaJSON: #"{"type":"object","properties":{"strength":{"type":"string"},"opportunity":{"type":"string"},"exercise":{"type":"string"},"sourceIDs":{"type":"array","items":{"type":"string"}},"principleID":{"type":"string"}},"required":["strength","opportunity","exercise","sourceIDs","principleID"],"additionalProperties":false}"#)
-        let response = try await model.generate(request)
-        try response.validate(for: request)
-        let fields = try GeneratedFields.audit(response.text, allowedSources: Set(attributable.map(\.sourceID)), principleIDs: [card.id])
-        let report = AuditReport(decisionID: episode.id, generationProfile: response.actualProfile, status: .ready,
+        let generated = try await ValidatedGeneration.run(request, model: model) {
+            try GeneratedFields.audit($0, allowedSources: Set(attributable.map(\.sourceID)), principleIDs: [card.id])
+        }
+        let fields = generated.value
+        let report = AuditReport(decisionID: episode.id, generationProfile: generated.profile, status: .ready,
             strength: fields.strength, opportunity: fields.opportunity, exercise: fields.exercise,
             sourceIDs: fields.sourceIDs, principleID: fields.principleID)
         try Task.checkCancellation()
