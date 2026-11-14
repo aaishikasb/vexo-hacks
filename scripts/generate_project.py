@@ -62,7 +62,7 @@ phases = [obj(kind, isa=kind, buildActionMask=2147483647, files=items, runOnlyFo
 def configs(key, settings):
     configs = []
     for name in ['Debug', 'Release']:
-        configs.append(obj(key+name, isa='XCBuildConfiguration', baseConfigurationReference=config, buildSettings={**settings, 'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if name == 'Debug' else '-O'}, name=name))
+        configs.append(obj(key+name, isa='XCBuildConfiguration', baseConfigurationReference=config, buildSettings={**settings, 'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if name == 'Debug' else '-O', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': '$(inherited) DEBUG' if name == 'Debug' else '$(inherited)'}, name=name))
     return obj(key+'configs', isa='XCConfigurationList', buildConfigurations=configs, defaultConfigurationIsVisible=0, defaultConfigurationName='Release')
 target = obj('target', isa='PBXNativeTarget', name='Voca', productName='Voca', productReference=app, productType='com.apple.product-type.application', buildConfigurationList=configs('target', {}), buildPhases=phases, buildRules=[], dependencies=[], packageProductDependencies=products)
 project = obj('project', isa='PBXProject', attributes={'BuildIndependentTargetsInParallel':'YES', 'LastUpgradeCheck':'2720'}, buildConfigurationList=configs('project', {}), compatibilityVersion='Xcode 14.0', developmentRegion='en', knownRegions=['en','Base'], mainGroup=group, productRefGroup=product_group, projectDirPath='', projectRoot='', targets=[target], packageReferences=packages)

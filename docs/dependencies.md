@@ -49,3 +49,10 @@ unverified.
 - https://github.com/VexoAI-Org/vexo-open-kit/tree/1e4291e2fa4896b1f603d3d4f0b009c483425da0
 - https://github.com/pipecat-ai/pipecat-build-ios/tree/6a204432df5cd533abb85e0577a7e79dccd93a04
 - https://developer.apple.com/documentation/avfaudio/avaudioconverter
+
+Meta camera transport: this Personal Team build uses the documented Bluetooth
+Classic path (`com.meta.ar.wearable` external accessory protocol), not Wi-Fi.
+See Meta's October 22 response in https://github.com/meta/meta-wearables-dat-ios/issues/354.
+The Wi-Fi-declared configuration reproduced `waitingForDevice`; Classic delivered
+an actual JPEG on the physical phone. Do not reintroduce Bonjour/local-network
+keys without intentionally changing and revalidating the transport.

@@ -95,3 +95,42 @@ the product handoff. Do not implement hardware or voice dependencies in Core.
    timing checks, then consented decoding/transcription checks.
 5. No demo video/submission claim should describe this checkpoint as a complete
    coaching product. Model weights remain fixed; no learning claim is verified.
+
+### Camera investigation — November 14
+
+User still reports waiting for device while wearing glasses. Real diagnostic
+confirmed registered/connected/compatible/donned, but the early permission query
+returned `MWDATCore.PermissionError.noDevice`. Camera startup now waits up to ten
+seconds for SDK discovery and starts the session before checking permission, as
+in the inspected Meta CameraAccess sample. Registration no longer overwrites an
+active session's status. Stop invalidates discovery and permission callbacks.
+
+After the change, a real-device check failed with `Session ended by device` and
+SDK wear state `doffed`; no photo was returned. This is **not** a camera pass or
+proof of the root cause. Signed Debug build passes; nine existing fixture tests
+pass (they do not exercise Meta hardware). `scripts/check_camera.py DEVICE_ID`
+is a DEBUG-only real-camera regression harness: it requires an unlocked phone
+and consenting camera subject; copies only state metadata, not the captured
+photo. Debug compilation conditions are now explicit in the project generator.
+The harness deletes its previous local snapshot before each copy because
+`devicectl copy` does not overwrite an existing destination. User subsequently confirmed briefly removing the glasses, so the `doffed`
+state is not evidence of a wear-detection fault. Session termination still
+requires a repeat with continuous wear.
+
+### Camera verified on physical phone
+
+The exact regression passed after selecting the documented Bluetooth Classic
+transport in Info.plist: `external-accessory` background mode plus
+`UISupportedExternalAccessoryProtocols = [com.meta.ar.wearable]`; removed Wi-Fi
+Bonjour/local-network declarations. Added the Bluetooth peripheral background
+mode specified by Meta. AutoDeviceSelector retained: a separate test with
+SpecificDeviceSelector did not resolve the stall and was reverted.
+
+Reference: https://github.com/meta/meta-wearables-dat-ios/issues/354 (Meta response,
+October 22, 2026). The configured Wi-Fi path previously stalled at
+`session=started, stream=waitingForDevice` even with connected/compatible/worn
+glasses. After the transport change, `python3 scripts/check_camera.py DEVICE_ID`
+returned `passed`, `stream=streaming`, `photoBytes=334852`, worn/connected/compatible.
+The photo stayed in app memory; only state metadata was copied. Signed iPhone
+Debug build passed and was installed. This proves a single real glasses photo,
+not sustained streaming, locked-phone behavior, inference, or Pipecat delivery.

@@ -10,6 +10,7 @@ import Observation
     private var session: DeviceSession?
     private var selector: AutoDeviceSelector?
     private var startupTimeout: Task<Void, Never>?
+    private var permissionTask: Task<Void, Never>?
     private var camera: Camera?
     private let sessionTokens = ListenerTokenBag()
     private let streamTokens = ListenerTokenBag()
@@ -41,6 +42,7 @@ import Observation
     }
     func register() async throws {
         try configure()
+        guard session == nil else { return }
         if Wearables.shared.registrationState == .registered {
             status = "Meta AI registration complete. Start the glasses camera."
             return
@@ -59,27 +61,29 @@ import Observation
         try configure()
         guard session == nil else { return }
         guard Wearables.shared.registrationState == .registered else { throw Failure.notRegistered }
-        status = "Checking glasses camera permission…"
-        if try await Wearables.shared.checkPermissionStatus(.camera) != .granted {
-            status = "Waiting for camera permission in Meta AI…"
-            guard try await Wearables.shared.requestPermission(.camera) == .granted else { throw Failure.notReady }
+        let current = generation
+        // Discovery arrives asynchronously after configure, including on a cold launch.
+        status = "Waiting for glasses discovery…"
+        for _ in 0..<40 {
+            if selector?.activeDevice != nil { break }
+            try await Task.sleep(for: .milliseconds(250))
         }
         try Task.checkCancellation()
-        guard !Wearables.shared.devices.isEmpty else { throw Failure.unavailable }
+        guard current == generation else { throw CancellationError() }
+        guard selector?.activeDevice != nil, !Wearables.shared.devices.isEmpty else { throw Failure.unavailable }
         let compatibility = Wearables.shared.devices.compactMap { Wearables.shared.deviceForIdentifier($0)?.compatibility() }
         if !compatibility.contains(.compatible) {
             if compatibility.contains(.deviceUpdateRequired) { throw Failure.deviceUpdate }
             if compatibility.contains(.sdkUpdateRequired) { throw Failure.sdkUpdate }
         }
         guard let selector else { throw Failure.notReady }
-        let current = generation
         let session = try Wearables.shared.createSession(deviceSelector: selector)
         self.session = session
         session.statePublisher.listen { [weak self] state in
             Task { @MainActor in
                 guard let self, current == self.generation else { return }
                 self.status = "Glasses session: \(state.description)"
-                if state == .started { self.startStream() }
+                if state == .started { self.prepareStream() }
                 if state == .stopped { self.stop() }
             }
         }.store(in: sessionTokens)
@@ -97,6 +101,27 @@ import Observation
             let lastStatus = self.status
             self.stop()
             self.status = "Camera did not become ready (\(lastStatus)). Check the glasses are connected and worn, then retry."
+        }
+    }
+    private func prepareStream() {
+        guard permissionTask == nil, camera == nil else { return }
+        let current = generation
+        permissionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.status = "Checking glasses camera permission…"
+                if try await Wearables.shared.checkPermissionStatus(.camera) != .granted {
+                    self.status = "Waiting for camera permission in Meta AI…"
+                    guard try await Wearables.shared.requestPermission(.camera) == .granted else { throw Failure.notReady }
+                }
+                try Task.checkCancellation()
+                guard self.generation == current else { return }
+                self.startStream()
+            } catch {
+                guard self.generation == current else { return }
+                self.stop()
+                self.status = "Camera permission failed: \(error.localizedDescription)"
+            }
         }
     }
     private func startStream() {
@@ -154,12 +179,13 @@ import Observation
     }
     func suspendForBackground() {
         // Meta permission redirects background the app before a camera session exists.
-        if session != nil { stop() }
+        if camera != nil { stop() }
     }
     func stop() {
         generation += 1
         ready = false
         startupTimeout?.cancel()
+        permissionTask?.cancel(); permissionTask = nil
         captureTimeout?.cancel()
         capture?.resume(throwing: Failure.interrupted)
         capture = nil; captureRequestedAt = nil
@@ -169,3 +195,51 @@ import Observation
         status = "Glasses camera stopped"
     }
 }
+
+#if DEBUG
+extension GlassesCamera {
+    /// Invoked only by the local device-check launch argument; never records audio.
+    func checkOnDevice(runID: String) async {
+        func report(_ outcome: String, error: Error? = nil) {
+            let wearables = Wearables.shared
+            let devices = wearables.devices.compactMap { wearables.deviceForIdentifier($0) }
+            let snapshot: [String: Any] = [
+                "runID": runID, "outcome": outcome, "status": status,
+                "registration": wearables.registrationState.description,
+                "session": session?.state.description ?? "none",
+                "stream": camera.map { String(describing: $0.stream.state) } ?? "none",
+                "selectorHasDevice": selector?.activeDevice != nil,
+                "devices": devices.map { ["link": String(describing: $0.linkState),
+                    "compatibility": $0.compatibility().displayString,
+                    "wear": String(describing: $0.donState), "hinge": String(describing: $0.hingeState)] },
+                "photoBytes": previewJPEG?.count ?? 0,
+                "errorDomain": error.map { ($0 as NSError).domain } ?? "",
+                "errorCode": error.map { ($0 as NSError).code } ?? 0
+            ]
+            do {
+                try FileManager.default.createDirectory(at: URL.documentsDirectory, withIntermediateDirectories: true)
+                let url = URL.documentsDirectory.appending(path: "camera-check.json")
+                try JSONSerialization.data(withJSONObject: snapshot, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+            } catch { status = "Could not save the local camera check result." }
+        }
+        do { try configure() } catch { status = error.localizedDescription; return }
+        previewJPEG = nil
+        report("waiting")
+        var failure: Error?
+        let task = Task { do { try await start() } catch { failure = error } }
+        for _ in 0..<50 {
+            if ready || failure != nil { break }
+            report("waiting", error: failure)
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        if ready {
+            do {
+                let (data, _) = try await photo()
+                report(data.isEmpty ? "failed" : "passed")
+            } catch { report("failed", error: error) }
+        } else { report("failed", error: failure) }
+        task.cancel()
+        stop()
+    }
+}
+#endif

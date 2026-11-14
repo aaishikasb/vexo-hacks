@@ -224,6 +224,7 @@
 "baseConfigurationReference" = "B79606FB3AFEA5BD1609ED40";
 "buildSettings" = {
 "SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
 };
 "name" = "Debug";
 };
@@ -232,6 +233,7 @@
 "baseConfigurationReference" = "B79606FB3AFEA5BD1609ED40";
 "buildSettings" = {
 "SWIFT_OPTIMIZATION_LEVEL" = "-O";
+"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited)";
 };
 "name" = "Release";
 };
@@ -258,6 +260,7 @@
 "baseConfigurationReference" = "B79606FB3AFEA5BD1609ED40";
 "buildSettings" = {
 "SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
 };
 "name" = "Debug";
 };
@@ -266,6 +269,7 @@
 "baseConfigurationReference" = "B79606FB3AFEA5BD1609ED40";
 "buildSettings" = {
 "SWIFT_OPTIMIZATION_LEVEL" = "-O";
+"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited)";
 };
 "name" = "Release";
 };

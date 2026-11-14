@@ -8,6 +8,14 @@ import UniformTypeIdentifiers
     var body: some Scene {
         WindowGroup {
             SetupView(camera: camera, band: band)
+                .task {
+                    #if DEBUG
+                    let args = ProcessInfo.processInfo.arguments
+                    if let index = args.firstIndex(of: "--camera-check"), args.indices.contains(index + 1) {
+                        await camera.checkOnDevice(runID: args[index + 1])
+                    }
+                    #endif
+                }
                 .onOpenURL { url in
                     Task { do { try await camera.handleURL(url) } catch { self.error = error.localizedDescription } }
                 }
