@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CoachEngineError: Error, Equatable { case unknownDecision, invalidCue, conflictingTerminalDelivery, invalidFeedback, staleFeedback, persistenceFailure, invalidEvidenceReferences }
+public enum CoachEngineError: Error, Equatable { case unknownDecision, duplicateDecision, invalidCue, conflictingTerminalDelivery, invalidFeedback, staleFeedback, persistenceFailure, invalidEvidenceReferences }
 
 /// Serialized, profile- and mode-specific LinUCB policy with atomic JSON persistence.
 public actor CoachEngine {
@@ -33,13 +33,15 @@ public actor CoachEngine {
 
     private static func freshDialogue(in s: MemorySnapshot, at now: Date) -> Bool {
         s.dialogue.contains { evidence in
-            guard let time = evidence.utteredAt, evidence.speaker?.lowercased() == "wearer" else { return false }
+            guard let time = evidence.utteredAt, let speaker = evidence.speaker?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !speaker.isEmpty, !["unknown", "undiarized", "unattributed"].contains(speaker.lowercased()) else { return false }
             let age = now.timeIntervalSince(time)
             return age >= 0 && age <= dialogueFreshness && !evidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
     public func selectCue(_ context: CueContext, explore: Bool, excluding: Strategy? = nil) throws -> CueDecision? {
+        guard !store.episodes.contains(where: { $0.id == context.decisionID }) else { throw CoachEngineError.duplicateDecision }
         let suppliedEvidenceIDs = Set(context.snapshot.approvedMemories.map(\.sourceID) + context.snapshot.dialogue.map(\.sourceID))
         guard suppliedEvidenceIDs.isDisjoint(with: store.invalidatedSourceIDs) else { throw CoachEngineError.invalidEvidenceReferences }
         let features = Self.features(for: context)
@@ -90,7 +92,8 @@ public actor CoachEngine {
         if status == .pending { return }
         if let cue {
             guard cue.decisionID == decisionID, cue.actualProfile == episode.decision.context.profile, cue.strategy == episode.decision.selectedAction, !cue.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CoachEngineError.invalidCue }
-            let allowed = Set(episode.decision.context.snapshot.approvedMemories.map(\.sourceID) + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString])
+            let approvedMemorySources = episode.decision.context.snapshot.approvedMemories.filter(\.shareApproved).map(\.sourceID)
+            let allowed = Set(approvedMemorySources + episode.decision.context.snapshot.dialogue.map(\.sourceID) + [episode.decision.context.scene.requestID.uuidString])
             guard Set(cue.sourceIDs).isSubset(of: allowed) else { throw CoachEngineError.invalidEvidenceReferences }
         }
         guard status == .pending || (status == .completed && cue != nil) || status == .failed || status == .cancelled else { throw CoachEngineError.invalidCue }

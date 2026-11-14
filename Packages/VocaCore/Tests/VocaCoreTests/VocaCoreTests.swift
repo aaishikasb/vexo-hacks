@@ -26,6 +26,10 @@ final class VocaCoreTests: XCTestCase {
         let s = MemorySnapshot(approvedMemories: [], dialogue: [stale, VocaFixtures.unknownSpeakerEvidence(at: c.requestedAt)], fetchedAt: c.requestedAt, coverage: .partial)
         let modified = CueContext(decisionID: UUID(), requestedAt: c.requestedAt, scene: c.scene, goal: c.goal, mode: c.mode, profile: c.profile, snapshot: s, knownPoint: nil)
         XCTAssertEqual(CoachEngine.features(for: modified)[9], 0)
+        let partner = Evidence(sourceID: "partner-turn", text: "I started pottery last month", speaker: "partner-1", utteredAt: c.requestedAt.addingTimeInterval(-5))
+        let partnerSnapshot = MemorySnapshot(approvedMemories: [], dialogue: [partner], fetchedAt: c.requestedAt, coverage: .complete)
+        var partnerContext = modified; partnerContext.snapshot = partnerSnapshot
+        XCTAssertEqual(CoachEngine.features(for: partnerContext)[9], 1)
     }
 
     func testUnavailableDisabledNoActionAndAlternativeExclusion() async throws {
@@ -44,6 +48,19 @@ final class VocaCoreTests: XCTestCase {
         }
     }
 
+    func testDuplicateDecisionIDRejectedAndUnapprovedMemorySourceRejected() async throws {
+        let engine = try CoachEngine(storeURL: tempURL())
+        let context = makeContext()
+        _ = try await selected(engine, context)
+        do { _ = try await engine.selectCue(context, explore: false, excluding: nil); XCTFail("duplicate decision ID accepted") } catch CoachEngineError.duplicateDecision {}
+
+        var unapproved = makeContext()
+        unapproved.snapshot.approvedMemories[0].shareApproved = false
+        let decision = try await selected(engine, unapproved)
+        let cue = CueResult(decisionID: decision.context.decisionID, actualProfile: decision.context.profile, strategy: decision.selectedAction, text: "A grounded short cue.", sourceIDs: ["mem-story"])
+        do { try await engine.recordDelivery(decisionID: decision.context.decisionID, cue: cue, status: .completed); XCTFail("unapproved memory source accepted") } catch CoachEngineError.invalidEvidenceReferences {}
+    }
+
     func testSignedUpdateNumericFeedbackReplayAndProfileSeparation() async throws {
         let url = tempURL(), profile = VocaFixtures.profile()
         let engine = try CoachEngine(storeURL: url)
@@ -53,7 +70,8 @@ final class VocaCoreTests: XCTestCase {
         let d = try await completedDecision(engine, context: c)
         let reward = FeedbackEvent(decisionID: d.context.decisionID, verdict: .helpful, revision: 1)
         try await engine.applyFeedback(reward)
-        let next = try await selected(engine, c, excluding: nil)
+        var nextContext = c; nextContext.decisionID = UUID()
+        let next = try await selected(engine, nextContext, excluding: nil)
         XCTAssertEqual(next.utilities[d.selectedAction.rawValue]!, 0.8, accuracy: 1e-9)
         XCTAssertEqual(d.features.filter { $0 == 1 }.count, 4)
 
@@ -63,12 +81,14 @@ final class VocaCoreTests: XCTestCase {
         XCTAssertEqual(practice.utilities[d.selectedAction.rawValue], 0)
 
         let reopened = try CoachEngine(storeURL: url)
-        let relaunch = try await selected(reopened, c, excluding: nil)
+        var relaunchContext = c; relaunchContext.decisionID = UUID()
+        let relaunch = try await selected(reopened, relaunchContext, excluding: nil)
         XCTAssertEqual(relaunch.utilities[d.selectedAction.rawValue]!, 0.8, accuracy: 1e-9)
         let bad = FeedbackEvent(decisionID: d.context.decisionID, verdict: .unhelpful, revision: 1)
         do { try await reopened.applyFeedback(bad); XCTFail("stale revision must fail") } catch CoachEngineError.staleFeedback {}
         try await reopened.applyFeedback(FeedbackEvent(decisionID: d.context.decisionID, verdict: .unhelpful, revision: 2))
-        let corrected = try await selected(reopened, c, excluding: nil)
+        var correctedContext = c; correctedContext.decisionID = UUID()
+        let corrected = try await selected(reopened, correctedContext, excluding: nil)
         XCTAssertEqual(corrected.utilities[d.selectedAction.rawValue]!, -0.8, accuracy: 1e-9)
         // Original E4B feedback still trains its frozen namespace after E2B selection.
         XCTAssertEqual(corrected.context.profile, profile)
@@ -84,7 +104,8 @@ final class VocaCoreTests: XCTestCase {
         try await engine.recordDelivery(decisionID: d.context.decisionID, cue: valid, status: .completed)
         do { try await engine.recordDelivery(decisionID: d.context.decisionID, cue: valid, status: .failed); XCTFail("terminal conflict accepted") } catch CoachEngineError.conflictingTerminalDelivery {}
         try await engine.applyFeedback(FeedbackEvent(decisionID: d.context.decisionID, verdict: .invalidEvidence, revision: 1))
-        let same = try await selected(engine, c, excluding: nil)
+        var sameContext = c; sameContext.decisionID = UUID()
+        let same = try await selected(engine, sameContext, excluding: nil)
         XCTAssertEqual(same.utilities[d.selectedAction.rawValue], 0)
     }
 
@@ -124,6 +145,8 @@ final class VocaCoreTests: XCTestCase {
         let scenarios = try Data(contentsOf: base.appendingPathComponent("Resources/PracticeScenarios/practice-scenarios.json"))
         let decoded = try CoachingContent.decode(cards: cards, scenarios: scenarios)
         XCTAssertEqual(decoded.scenarios.count, 3)
+        XCTAssertEqual(decoded.cards.count, 9)
+        XCTAssertEqual(Set(decoded.cards.map(\.bookTitle)), Set(["The Communication Book", "The Art of Witty Banter", "How to Listen with Intention", "Thanks for the Feedback", "The Decision Book", "Show Your Work!", "Radical Candor", "Read People Like a Book", "The Well-Spoken Thesaurus"]))
         let invalid = String(decoding: scenarios, as: UTF8.self).replacingOccurrences(of: "listen-then-follow", with: "missing-card")
         XCTAssertThrowsError(try CoachingContent.decode(cards: cards, scenarios: Data(invalid.utf8)))
     }
