@@ -681,3 +681,10 @@ versus preference-conditioned suggestions in comparable contexts, and have the
 wearer score relevance, factual grounding and sounds-like-me preference. Track
 format/rejection failures separately from quality. Never turn evaluator scores
 or implicit engagement into policy rewards. No measured improvement claimed.
+
+Taste verification update, 16:16 Pacific: the earlier 21-case run was interrupted
+by a different installed build, not completed behind the locked screen. Restarted
+on the unlocked iPhone: 30/30 synthetic E2B cases with --taste passed, with
+Pipecat ready, cancelled request rejected, and post-cancellation output validated.
+This checks validity/recovery with style conditioning, not preference adherence
+or real-world taste improvement. No microphone, glasses or playback involved.
