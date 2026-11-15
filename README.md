@@ -1,5 +1,10 @@
 # Voca
 
+**Converse better.**
+
+Built for [VexoHacks](https://vexohacks.devpost.com/) by Monika Rajput and
+Aaishika S Bhattacharya. Read the [project story on Devpost](https://devpost.com/software/voca-w32rea).
+
 Voca is a native iPhone conversation companion that helps the wearer find
 something authentic to say. It combines a glasses photo, fresh on-device dialogue,
 and explicitly approved personal memories into a short spoken cue, then offers
@@ -10,6 +15,42 @@ SwiftUI owns the interface and native audio; LiteRT-LM runs Gemma 4 E4B (with E2
 fallback), embedded Pipecat coordinates speech, and the Foundation-only
 `VocaCore` package owns shared contracts, policy, and persistence. There is no
 application server or cloud transcription fallback. Only one model runs at a time.
+
+## Why Voca
+
+Conversations can move faster than you can find the words. Voca offers a short
+starting point through your glasses so you can stay present: ask a follow-up,
+connect the topic to a personal experience, or find a natural opening. You choose
+what to say, which memories to share, and whether a suggestion was helpful.
+
+## From a cue to practice
+
+1. **Get context.** A glasses photo supplies visible surroundings; the bracelet
+   supplies recent dialogue through on-device transcription. Approved memories
+   add personal details you have chosen to share.
+2. **Request a cue.** Use **Get cue** or a calibrated single tap on the assigned
+   bracelet. Voca selects an evidence-supported strategy, generates a short cue
+   locally, and speaks it through the selected glasses output.
+3. **Review and respond.** Inspect the context behind a cue and rate its usefulness.
+   Only explicit helpful/unhelpful feedback on completed deliveries updates
+   strategy preferences; Gemma's model weights stay fixed.
+4. **Practice the next conversation.** Try a spoken scenario or custom topic.
+   Practice stays separate from real conversation evidence and personal memories.
+
+## Screenshots
+
+Screenshots supplied from the November 14, 2026 app session. Select an image to
+view it at full resolution.
+
+| Session | Review | Memory |
+| --- | --- | --- |
+| <a href="assets/screenshots/session.png"><img src="assets/screenshots/session.png" width="250" alt="Session showing listening status, Get cue, a recent cue, and feedback controls"></a> | <a href="assets/screenshots/review.png"><img src="assets/screenshots/review.png" width="250" alt="Cue review showing photo context, cited dialogue, and feedback-based strategy scores"></a> | <a href="assets/screenshots/memory.png"><img src="assets/screenshots/memory.png" width="250" alt="Memory showing active band listening and explicitly approved personal details"></a> |
+| Request a cue and give feedback. | See what shaped the suggestion. | Choose what Voca can remember. |
+
+| Spoken practice | Device settings |
+| --- | --- |
+| <a href="assets/screenshots/practice.png"><img src="assets/screenshots/practice.png" width="250" alt="Practice setup with a meetup scenario, optional custom topic, audio output, and adaptive thinking time"></a> | <a href="assets/screenshots/settings.png"><img src="assets/screenshots/settings.png" width="250" alt="Settings showing connected Ray-Ban Meta glasses, assigned Band 18, and glasses audio output"></a> |
+| Rehearse a situation at your own pace. | Connect the glasses and your assigned bracelet. |
 
 The `docs/` directory contains local-only working notes and verification artifacts.
 It is intentionally ignored by Git; references to it below require that local directory.
@@ -23,12 +64,29 @@ It is intentionally ignored by Git; references to it below require that local di
 - **Memory:** approved personal details and a persistent queue of short band
   transcript suggestions that require individual approval or dismissal.
 
-These flows are implemented, but complete band tap → fresh dialogue → model →
-glasses playback still needs an uninterrupted physical-device verification.
-Recorded checks include glasses capture and speech, repeated model generation,
-feedback persistence, and synthetic practice prompts; they do not establish
-long-session reliability or coaching effectiveness. See the
+The [Devpost submission](https://devpost.com/software/voca-w32rea) reports a
+completed physical-device run: a bracelet tap triggered an E4B cue using fresh
+dialogue, and the wearer confirmed hearing the full, relevant cue through the
+glasses. That run reached native playback start in approximately **6.9 seconds**;
+this is a single-run baseline, not a sustained latency guarantee.
+
+Other recorded checks include glasses capture and speech, repeated model
+generation, feedback persistence, and synthetic practice prompts. These do not
+establish long-session reliability or coaching effectiveness. See the
 [device handoff](docs/handoff-device.md) for dated evidence and remaining checks.
+
+## What we learned and what's next
+
+The difficult integration work lies between generation and delivery: calibrated
+gestures, fresh context, Bluetooth routing, model lifecycles, and interruptions
+must agree before a cue counts as delivered. Captured speech also leaves speaker
+identity uncertain, so excerpts retain their provenance and require explicit
+approval before becoming personal memories.
+
+The next priorities described in the [project story](https://devpost.com/software/voca-w32rea)
+are lower latency, longer-session testing, and real microphone turn-taking checks
+for practice. Evaluating whether cues feel natural and useful across situations
+remains separate from proving that the technical pipeline works.
 
 ## Open and build
 
@@ -163,7 +221,8 @@ swiftc -parse-as-library Voca/Inference/ModelArtifact.swift scripts/check_model_
 ```
 
 Physical E4B text check passed: load 11.18 s, first generation 3.41 s, second
-2.00 s. Full photo-to-speech latency and thermal behavior remain unmeasured.
+2.00 s. The Devpost demo baseline above measures one tap-to-playback-start run;
+sustained photo-to-speech latency and thermal behavior remain unverified.
 
 Feedback replay verification (use private before/after app-store exports, never
 commit them):
