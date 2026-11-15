@@ -20,7 +20,8 @@ class NativeSpeechAdapter(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, TranscriptionFrame):
             if frame.finalized:
-                self.emit({'type': 'practiceTurnAccepted', 'requestID': frame.metadata['requestID']})
+                self.emit({'type': frame.metadata.get('acceptedType', 'practiceTurnAccepted'),
+                           'requestID': frame.metadata['requestID']})
             return
         if not isinstance(frame, TTSSpeakFrame):
             await self.push_frame(frame, direction)
@@ -56,17 +57,25 @@ async def serve(native):
     adapter = NativeSpeechAdapter(emit)
     worker = PipelineWorker(Pipeline([adapter]), enable_rtvi=False,
                             enable_turn_tracking=False, idle_timeout_secs=None)
+    # Transcription must not wait behind a spoken cue's native-playback acknowledgement.
+    transcript_worker = PipelineWorker(Pipeline([NativeSpeechAdapter(emit)]), enable_rtvi=False,
+                                       enable_turn_tracking=False, idle_timeout_secs=None)
     ready = asyncio.Event()
+    transcripts_ready = asyncio.Event()
+
+    @transcript_worker.event_handler('on_pipeline_started')
+    async def transcripts_started(worker, frame):
+        transcripts_ready.set()
 
     @worker.event_handler('on_pipeline_started')
     async def started(worker, frame):
         ready.set()
 
     runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
-    await runner.add_workers(worker)
+    await runner.add_workers(worker, transcript_worker)
     task = asyncio.create_task(runner.run())
     try:
-        await asyncio.wait_for(ready.wait(), timeout=15)
+        await asyncio.wait_for(asyncio.gather(ready.wait(), transcripts_ready.wait()), timeout=15)
         emit({'type': 'ready'})
         while not task.done():
             raw = native.poll()
@@ -76,16 +85,18 @@ async def serve(native):
             event = json.loads(raw)
             if event['type'] == 'playback':
                 adapter.acknowledge(event)
-            elif event['type'] == 'practiceTurn':
+            elif event['type'] in ('practiceTurn', 'bandTranscript'):
                 request_id = str(UUID(event['requestID']))
                 session_id = str(UUID(event['sessionID']))
                 text = event['text']
                 if not isinstance(text, str) or not text.strip() or len(text) > 2000:
-                    raise ValueError('Invalid practice turn')
+                    raise ValueError('Invalid transcript')
                 frame = TranscriptionFrame(text=text, user_id=session_id,
                                            timestamp=event['timestamp'], finalized=True)
                 frame.metadata['requestID'] = request_id
-                await worker.queue_frame(frame)
+                frame.metadata['acceptedType'] = ('bandTranscriptAccepted' if event['type'] == 'bandTranscript'
+                                                  else 'practiceTurnAccepted')
+                await transcript_worker.queue_frame(frame)
             elif event['type'] == 'speech':
                 request_id = str(UUID(event['requestID']))
                 text = event['text']
@@ -96,6 +107,9 @@ async def serve(native):
                 await worker.queue_frame(frame)
             else:
                 raise ValueError('Unknown native message')
+            event = None
+            frame = None
+            raw = None
         await task
     finally:
         await runner.cancel()

@@ -58,6 +58,25 @@ class PipelineChecks(unittest.IsolatedAsyncioTestCase):
         self.native.send(dict(type='playback', requestID=request_id, outcome='cancelled'))
         self.assertEqual((await self.event())['outcome'], 'cancelled')
 
+    async def test_band_transcription_does_not_wait_for_speech_and_never_speaks_it(self):
+        speech_id = str(uuid4())
+        self.native.send(dict(type='speech', requestID=speech_id, text='A cue.'))
+        self.assertEqual((await self.event())['type'], 'speak')
+        transcript_id = str(uuid4())
+        self.native.send(dict(type='bandTranscript', requestID=transcript_id,
+                              sessionID=str(uuid4()), text='My name is Alex.', timestamp='2026-11-14T12:00:00Z'))
+        self.assertEqual(await self.event(), dict(type='bandTranscriptAccepted', requestID=transcript_id))
+        self.assertTrue(self.native.events.empty())
+        self.native.send(dict(type='playback', requestID=speech_id, outcome='completed'))
+        self.assertEqual((await self.event())['outcome'], 'completed')
+
+    async def test_practice_and_live_transcripts_keep_separate_acknowledgements(self):
+        for kind, accepted in [('practiceTurn', 'practiceTurnAccepted'), ('bandTranscript', 'bandTranscriptAccepted')]:
+            request_id = str(uuid4())
+            self.native.send(dict(type=kind, requestID=request_id, sessionID=str(uuid4()),
+                                  text='I enjoy hiking.', timestamp='2026-11-14T12:00:00Z'))
+            self.assertEqual(await self.event(), dict(type=accepted, requestID=request_id))
+
 
 if __name__ == '__main__':
     unittest.main()
