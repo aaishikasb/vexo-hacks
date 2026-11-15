@@ -126,7 +126,7 @@ private actor ScopedEvidenceModel: ModelGenerating {
 }
 
 @Test(arguments: [Goal.enter, Goal.explain])
-func cuePromptIncludesOnlySelectedStrategyEvidence(goal: Goal) async throws {
+func cuePromptIncludesCurrentDialogueAlongsideSelectedStrategyEvidence(goal: Goal) async throws {
     let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let coach = try CoachEngine(storeURL: directory.appending(path: "episodes.json"))
@@ -138,20 +138,20 @@ func cuePromptIncludesOnlySelectedStrategyEvidence(goal: Goal) async throws {
         dialogue: [Evidence(sourceID: "canonical-dialogue", text: "UNIQUE_DIALOGUE_I enjoy gardening",
             speaker: "partner", utteredAt: now, shareApproved: false)], fetchedAt: now, coverage: .complete)
     let point = "UNIQUE_POINT_Explain my solar project"
-    let model = ScopedEvidenceModel(sources: [goal == .enter ? "s1" : "p1"])
+    let model = ScopedEvidenceModel(sources: goal == .enter ? ["d1"] : ["p1", "d1"])
     let cue = try await CuePipeline(model: model, coach: coach).prepare(scene: scene,
         requestedAt: now, goal: goal, knownPoint: point, snapshot: snapshot)
     let prompt = try #require(await model.prompts.first)
     #expect(!prompt.contains("UNIQUE_MEMORY_"))
-    #expect(!prompt.contains("UNIQUE_DIALOGUE_"))
+    #expect(prompt.contains("UNIQUE_DIALOGUE_"))
     #expect(prompt.contains("UNIQUE_SCENE_"))
     #expect(prompt.contains("UNIQUE_POINT_") == (goal == .explain))
-    #expect(cue.strategy == (goal == .enter ? .situationalOpener : .explainClearly))
+    #expect(cue.strategy == (goal == .enter ? .followUp : .explainClearly))
     let episode = try #require(await coach.episodes().first)
     // Prompt scoping must not change the frozen decision evidence or canonical IDs.
     #expect(episode.decision.context.snapshot == snapshot)
     #expect(episode.decision.context.knownPoint == point)
-    #expect(cue.sourceIDs == [goal == .enter ? scene.requestID.uuidString : "user-input:\(cue.decisionID.uuidString)"])
+    #expect(cue.sourceIDs == (goal == .enter ? ["canonical-dialogue"] : ["user-input:\(cue.decisionID.uuidString)", "canonical-dialogue"]))
 }
 
 @Test(arguments: [Goal.enter, Goal.explain])

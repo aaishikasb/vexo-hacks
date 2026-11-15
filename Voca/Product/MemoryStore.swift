@@ -8,14 +8,17 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
     let kind: Kind
     let decisionID: UUID?
     let savedAt: Date
+    var capturedSource: MemorySuggestion? = nil
     var id: String { evidence.sourceID }
 }
 
 @MainActor @Observable final class MemoryStore {
     enum Failure: LocalizedError {
-        case text, unavailable, limit, corrupt
+        case text, unavailable, limit, corrupt, suggestionsFull, confirmation
         var errorDescription: String? {
             switch self {
+            case .suggestionsFull: "Your 100 suggestion slots are full. Review or clear suggestions, then resume listening."
+            case .confirmation: "Confirm this detail is accurate and yours to share before approving it."
             case .text: "Enter a short memory (up to 240 characters) or a conversation excerpt (up to 500 characters)."
             case .unavailable: "Your saved memories could not be opened. Existing data has been preserved. Restart Voca to retry."
             case .limit: "You have 100 saved entries. Delete an entry before adding another."
@@ -33,6 +36,9 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
     private(set) var loaded = false
     private(set) var loadError: String?
     let url: URL
+    private var pendingSuggestions: [MemorySuggestion] = []
+    var suggestions: [MemorySuggestion] { pendingSuggestions.filter { suggestion in !records.contains { $0.id == suggestion.id } } }
+    private var suggestionsURL: URL { url.deletingLastPathComponent().appending(path: "Capture/suggestions.json") }
     var records: [MemoryEntry] { document.entries }
     var audits: [AuditReport] { document.audits }
     var pendingDeletionIDs: Set<String> { document.pendingDeletionIDs }
@@ -63,6 +69,22 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
                           ($0.kind != .dialogue || $0.decisionID != nil) }) else { throw Failure.corrupt }
                 document = decoded
             }
+            let captureDirectory = suggestionsURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: captureDirectory, withIntermediateDirectories: true)
+            var captureURL = captureDirectory
+            try captureURL.setResourceValues(values)
+            #if os(iOS)
+            // Pending suggestions must remain writable during authorized locked-phone BLE capture.
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: captureDirectory.path)
+            #endif
+            if FileManager.default.fileExists(atPath: suggestionsURL.path) {
+                let data = try Data(contentsOf: suggestionsURL)
+                guard data.count <= 500_000 else { throw Failure.corrupt }
+                let decoded = try JSONDecoder().decode([MemorySuggestion].self, from: data)
+                guard decoded.count <= 100, Set(decoded.map(\.id)).count == decoded.count,
+                      decoded.allSatisfy({ !$0.text.isEmpty && $0.text.count <= 240 && $0.id.hasPrefix("band:") }) else { throw Failure.corrupt }
+                pendingSuggestions = decoded
+            }
             loaded = true; loadError = nil
         } catch {
             loadError = Failure.unavailable.localizedDescription
@@ -75,6 +97,40 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
         try add(MemoryEntry(evidence: Evidence(sourceID: "memory:\(UUID().uuidString)", text: text,
             speaker: "wearer", utteredAt: nil, shareApproved: true), kind: .personalMemory,
             decisionID: nil, savedAt: Date()))
+    }
+
+    func addSuggestions(_ values: [MemorySuggestion]) throws {
+        var pending = suggestions
+        for value in values {
+            guard !value.text.isEmpty, value.text.count <= 240, value.id.hasPrefix("band:") else { throw Failure.text }
+            guard !pending.contains(where: { $0.id == value.id || $0.text.caseInsensitiveCompare(value.text) == .orderedSame }),
+                  !records.contains(where: { $0.id == value.id || $0.evidence.text.caseInsensitiveCompare(value.text) == .orderedSame }) else { continue }
+            pending.append(value)
+        }
+        guard pending.count <= 100 else { throw Failure.suggestionsFull }
+        try persistSuggestions(pending)
+    }
+
+    func approveSuggestion(id: String, confirmed: Bool) throws {
+        guard confirmed else { throw Failure.confirmation }
+        guard let suggestion = suggestions.first(where: { $0.id == id }) else { return }
+        guard document.entries.count < 100 else { throw Failure.limit }
+        var next = document
+        // Approval adopts this detail as the user's shareable memory; the captured speaker remains unknown.
+        next.entries.append(MemoryEntry(evidence: Evidence(sourceID: suggestion.id, text: suggestion.text,
+            speaker: "wearer", utteredAt: nil, shareApproved: true), kind: .personalMemory,
+            decisionID: nil, savedAt: Date(), capturedSource: suggestion))
+        // Persist approval first; a failed queue cleanup cannot lose or duplicate the approved memory.
+        try persist(next)
+        try persistSuggestions(pendingSuggestions.filter { $0.id != id })
+    }
+
+    func rejectSuggestion(id: String) throws {
+        try persistSuggestions(pendingSuggestions.filter { $0.id != id })
+    }
+
+    func clearSuggestions() throws {
+        try persistSuggestions([])
     }
 
     func addDialogue(text: String, speaker: String?, utteredAt: Date?, decisionID: UUID) throws {
@@ -113,6 +169,7 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
         let affectedDecisions = Set(next.entries.filter { $0.id == sourceID }.compactMap(\.decisionID))
         let auditSources = next.auditSources
         next.entries.removeAll { $0.id == sourceID }
+        try persistSuggestions(pendingSuggestions.filter { $0.id != sourceID })
         next.audits.removeAll { $0.sourceIDs.contains(sourceID) || affectedDecisions.contains($0.decisionID) ||
             auditSources[$0.decisionID.uuidString]?.contains(sourceID) == true }
         let remainingAuditIDs = Set(next.audits.map { $0.decisionID.uuidString })
@@ -151,6 +208,17 @@ struct MemoryEntry: Codable, Identifiable, Equatable {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.count <= maximum else { throw Failure.text }
         return value
+    }
+
+    private func persistSuggestions(_ next: [MemorySuggestion]) throws {
+        guard loaded else { throw Failure.unavailable }
+        let data = try JSONEncoder().encode(next)
+        #if os(iOS)
+        try data.write(to: suggestionsURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
+        try data.write(to: suggestionsURL, options: .atomic)
+        #endif
+        pendingSuggestions = next
     }
 
     private func persist(_ next: Document) throws {

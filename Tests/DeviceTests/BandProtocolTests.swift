@@ -88,3 +88,10 @@ import Testing
     #expect(taps.observations.count == 32)
     #expect(taps.observations.last?.milliseconds == 139)
 }
+
+@Test func automaticBandReconnectStillRequiresVerified18() throws {
+    let info = Data([1,1,1,1,0,1,18,0,0x34,0,244,0,0,0,0,0])
+    _ = try BandProtocol.Info(info, assignedNumber: 18)
+    #expect(throws: (any Error).self) { try BandProtocol.Info(info, assignedNumber: 19) }
+    #expect(!BandProtocol.matches(number: 18, services: [], name: "Vexo-HACK-18", manufacturer: nil))
+}

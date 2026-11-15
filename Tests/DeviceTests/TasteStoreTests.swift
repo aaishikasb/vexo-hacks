@@ -106,3 +106,15 @@ func tasteTransfersAcrossModelsWithoutBecomingEvidence(invalidCitation: Bool) as
     #expect(await model.prompts.first?.contains(TastePreference.relaxed.instruction) == true)
     #expect(await coach.episodes().allSatisfy { $0.feedback == nil })
 }
+
+@MainActor @Test func factualAndTimingCorrectionsNeverBecomeStylePreferences() throws {
+    let dir = URL.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = TasteStore(url: dir.appending(path: "taste.json")); try store.load()
+    let episode = ratedTasteEpisode()
+    for issue in [FeedbackIssue.wrongFacts, .wrongMoment, .wrongStrategy] {
+        try store.save(episode: episode, reasons: [.relaxed], alternative: "The object was a book", approvedExample: true, issue: issue)
+        #expect(store.guidance(episodes: [episode], goal: .deepen).instructions.isEmpty)
+        #expect(store.guidance(episodes: [episode], goal: .deepen).examples.isEmpty)
+    }
+}

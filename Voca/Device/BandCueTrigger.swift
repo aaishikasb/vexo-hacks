@@ -23,7 +23,7 @@ nonisolated struct BandCueTrigger {
         cancelPending()
     }
 
-    /// Recreate link-scoped history after disconnect/band change; calibration must be confirmed again.
+    /// Discard link-scoped events; restore saved calibration only after the assigned band is verified.
     mutating func reset() { self = Self() }
 
     /// Returns the deadline the caller should schedule. Call `consume` with current readiness then.

@@ -3,11 +3,16 @@ import AVKit
 
 /// Semantic colors keep the conversation surface independent of device diagnostics.
 enum VocaTheme {
-    static let background = adaptive(light: 0xF5F5F2, dark: 0x0A0A0A)
-    static let surface = adaptive(light: 0xFFFFFF, dark: 0x1F2023)
+    static let background = adaptive(light: 0xF5F5F2, dark: 0x000000)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x141416)
+    static let surfaceRaised = adaptive(light: 0xFFFFFF, dark: 0x202027)
+    static let surfaceEdge = adaptive(light: 0xD7D7DC, dark: 0x34343F)
     static let foreground = adaptive(light: 0x15171C, dark: 0xFAFAFA)
     static let secondary = adaptive(light: 0x50584F, dark: 0xB0B3BA)
-    static let accent = adaptive(light: 0xE7E3DC, dark: 0xE7E3DC)
+    static let accent = adaptive(light: 0xFFFFFF, dark: 0xFFFFFF)
+    static let glow = Color(red: 0.85, green: 0.06, blue: 0.12)
+    static let wave = Color(red: 1, green: 0.32, blue: 0.32)
+    static let border = adaptive(light: 0x767680, dark: 0x73737D)
     static let onAccent = Color(red: 21.0 / 255, green: 23.0 / 255, blue: 28.0 / 255)
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
@@ -116,4 +121,12 @@ struct AudioOutputPicker: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+extension View {
+    func vocaSurface() -> some View {
+        self.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(LinearGradient(colors: [VocaTheme.surfaceRaised, VocaTheme.surface], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(VocaTheme.surfaceEdge, lineWidth: 0.5))
+    }
 }

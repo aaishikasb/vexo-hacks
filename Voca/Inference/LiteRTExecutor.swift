@@ -66,7 +66,7 @@ actor LiteRTExecutor: ModelGenerating {
         }
         engineConfig = config
         recoveryCount = 0
-        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v3.1-explicit-style-preferences")
+        profile = ModelProfile(modelID: modelID, artifactSHA256: artifact.sha256, promptVersion: "voca-v3.2-live-topic-dialogue")
         do {
             try Task.checkCancellation()
             let probe = ModelRequest(requestID: UUID(), kind: .cue, requestedProfile: profile!,

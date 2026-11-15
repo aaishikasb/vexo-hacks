@@ -25,7 +25,11 @@ final class VocaCoreTests: XCTestCase {
         let stale = VocaFixtures.staleDialogue(now: c.requestedAt)
         let s = MemorySnapshot(approvedMemories: [], dialogue: [stale, VocaFixtures.unknownSpeakerEvidence(at: c.requestedAt)], fetchedAt: c.requestedAt, coverage: .partial)
         let modified = CueContext(decisionID: UUID(), requestedAt: c.requestedAt, scene: c.scene, goal: c.goal, mode: c.mode, profile: c.profile, snapshot: s, knownPoint: nil)
-        XCTAssertEqual(CoachEngine.features(for: modified)[9], 0)
+        XCTAssertEqual(CoachEngine.features(for: modified)[9], 1)
+        XCTAssertNil(s.dialogue.last?.speaker)
+        var staleOnly = modified
+        staleOnly.snapshot = MemorySnapshot(approvedMemories: [], dialogue: [stale], fetchedAt: c.requestedAt, coverage: .partial)
+        XCTAssertEqual(CoachEngine.features(for: staleOnly)[9], 0)
         let partner = Evidence(sourceID: "partner-turn", text: "I started pottery last month", speaker: "partner-1", utteredAt: c.requestedAt.addingTimeInterval(-5))
         let partnerSnapshot = MemorySnapshot(approvedMemories: [], dialogue: [partner], fetchedAt: c.requestedAt, coverage: .complete)
         var partnerContext = modified; partnerContext.snapshot = partnerSnapshot

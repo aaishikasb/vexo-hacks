@@ -20,7 +20,7 @@ import Observation
     private var linkGeneration = 0
     private var pending: Pending?
     private var scanTimeout: Task<Void, Never>?
-    private var verified = false
+    private(set) var verified = false
     private var timeline = BandAudioTimeline()
     private var listening = false
 
@@ -32,7 +32,9 @@ import Observation
         let timeout: Task<Void, Never>
     }
 
-    /// Called only from an explicit Connect action after the bag number is entered.
+    var connectionActive: Bool { assignedNumber != nil }
+
+    /// Reconnect only the assigned identity; discovery and GET_INFO both verify it.
     func connect(assignedNumber: Int) throws {
         guard (1...999).contains(assignedNumber) else { throw BandProtocol.Failure.identity }
         guard peripheral == nil, self.assignedNumber == nil else { throw BandProtocol.Failure.busy }

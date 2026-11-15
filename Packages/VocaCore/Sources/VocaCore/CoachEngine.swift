@@ -4,7 +4,7 @@ public enum CoachEngineError: Error, Equatable { case unknownDecision, duplicate
 
 /// Serialized, profile- and mode-specific LinUCB policy with atomic JSON persistence.
 public actor CoachEngine {
-    public static let policyVersion = "linucb-v1"
+    public static let policyVersion = "linucb-v2-topic-dialogue"
     public static let dialogueFreshness: TimeInterval = 30
     private struct Store: Codable { var episodes: [Episode] = []; var invalidatedSourceIDs: Set<String> = [] }
     private struct PolicyKey: Hashable { var profile: ModelProfile; var mode: SessionMode }
@@ -31,13 +31,15 @@ public actor CoachEngine {
          freshDialogue(in: c.snapshot, at: c.requestedAt) ? 1 : 0]
     }
 
+    /// Speaker identity is optional for topic follow-ups, never inferred as the wearer.
+    public static func isFreshDialogue(_ evidence: Evidence, at now: Date) -> Bool {
+        guard let time = evidence.utteredAt else { return false }
+        let age = now.timeIntervalSince(time)
+        return age >= 0 && age <= dialogueFreshness && !evidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private static func freshDialogue(in s: MemorySnapshot, at now: Date) -> Bool {
-        s.dialogue.contains { evidence in
-            guard let time = evidence.utteredAt, let speaker = evidence.speaker?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !speaker.isEmpty, !["unknown", "undiarized", "unattributed"].contains(speaker.lowercased()) else { return false }
-            let age = now.timeIntervalSince(time)
-            return age >= 0 && age <= dialogueFreshness && !evidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        s.dialogue.contains { isFreshDialogue($0, at: now) }
     }
 
     public func selectCue(_ context: CueContext, explore: Bool, excluding: Strategy? = nil) throws -> CueDecision? {
@@ -56,7 +58,7 @@ public actor CoachEngine {
             case .explainClearly:
                 return context.knownPoint?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
                     context.knownPointSourceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            case .situationalOpener: return sceneUseful && context.goal == .enter
+            case .situationalOpener: return sceneUseful && context.goal == .enter && !fresh
             }
         }
         if let excluding, eligible.count > 1 { eligible.removeAll { $0 == excluding } }
@@ -66,7 +68,7 @@ public actor CoachEngine {
         let utilities = Dictionary(uniqueKeysWithValues: eligible.map { ($0.rawValue, Self.utility(arms[$0]!, features)) })
         func tieRank(_ action: Strategy) -> Int {
             let preferred: [Strategy] = switch context.goal {
-            case .enter: [.situationalOpener, .personalConnection, .followUp, .reflectClarify, .explainClearly]
+            case .enter: [.situationalOpener, .followUp, .reflectClarify, .personalConnection, .explainClearly]
             case .deepen: [.reflectClarify, .followUp, .personalConnection, .situationalOpener, .explainClearly]
             case .explain: [.explainClearly, .personalConnection, .reflectClarify, .followUp, .situationalOpener]
             }

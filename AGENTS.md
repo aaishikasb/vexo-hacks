@@ -65,3 +65,15 @@ signing setup, and current limitations are in `README.md`. Run
 chosen in Xcode into ignored `.local/Signing.xcconfig`. Do not commit signing
 credentials or provisioning profiles. SDK pins and the Pipecat mobile-source
 blocker are recorded in `docs/dependencies.md`.
+
+## Continuous memory capture
+
+`BandListening` owns band capture and recognition rollover. `LocalTranscriber`
+requires on-device speech assets; Pipecat uses a separate transcription worker
+so native speech acknowledgements cannot stall capture. Never retain full live
+transcripts or raw audio. Only short unapproved `MemorySuggestion` excerpts enter
+Memory; approval must remain explicit, preserve source provenance, and never
+claim an unknown captured speaker is the wearer. Pending suggestions use a
+separate protected file for background writes; approved memory retains complete
+file protection. Stop/drain capture before bulk suggestion deletion. See
+README's continuous band memory section for limits and device checks.

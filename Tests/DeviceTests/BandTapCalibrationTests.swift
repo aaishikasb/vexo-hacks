@@ -77,3 +77,90 @@ private func beginDoubleCheck() -> BandTapCalibration {
     #expect(check.phase == .idle)
     #expect(check.settlingInterval == nil)
 }
+
+private func calibrationBand(number: Int = 18, firmwarePatch: UInt8 = 0, events: Bool = true) throws -> BandProtocol.Info {
+    try BandProtocol.Info(Data([1, 1, 1, 1, firmwarePatch, 1, UInt8(number & 255), UInt8(number >> 8),
+                                events ? 4 : 0, 0, 244, 0, 0, 0, 0, 0]), assignedNumber: number)
+}
+
+@Test func completedTapCalibrationPersistsForSameBandAndFirmware() throws {
+    let suite = "voca-tap-test-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let band = try calibrationBand()
+    var firstLaunch = BandTapCalibration()
+    let missing = firstLaunch.restore(for: band, defaults: defaults)
+    #expect(!missing)
+    var check = beginDoubleCheck()
+    #expect(!check.save(for: band, defaults: defaults))
+    check.receive(milliseconds: 3_000, code: 1, at: calibrationEpoch.addingTimeInterval(3))
+    check.receive(milliseconds: 4_000, code: 2, at: calibrationEpoch.addingTimeInterval(3.4))
+    let finished = check.finishDouble(at: calibrationEpoch.addingTimeInterval(5.4))
+    #expect(finished)
+    #expect(check.save(for: band, defaults: defaults))
+
+    var relaunched = BandTapCalibration()
+    let relaunchedDefaults = try #require(UserDefaults(suiteName: suite))
+    let restored = relaunched.restore(for: band, defaults: relaunchedDefaults)
+    #expect(restored)
+    #expect(relaunched.phase == .complete)
+    #expect(relaunched.settlingInterval == 1.25)
+    let wrongBand = relaunched.restore(for: try calibrationBand(number: 19), defaults: defaults)
+    #expect(!wrongBand)
+    #expect(relaunched.settlingInterval == nil)
+    let differentFirmware = relaunched.restore(for: try calibrationBand(firmwarePatch: 1), defaults: defaults)
+    #expect(!differentFirmware)
+    let unsupported = relaunched.restore(for: try calibrationBand(events: false), defaults: defaults)
+    #expect(!unsupported)
+    let existingCalibration = relaunched.restore(for: band, defaults: defaults)
+    #expect(existingCalibration)
+    check.startSingle(at: calibrationEpoch.addingTimeInterval(10))
+    #expect(!check.save(for: band, defaults: defaults))
+    let previousStillSaved = relaunched.restore(for: band, defaults: defaults)
+    #expect(previousStillSaved)
+    #expect(relaunched.settlingInterval == 1.25)
+}
+
+@Test func savedTapCalibrationRejectsCorruptAndUnsafeIntervals() throws {
+    let suite = "voca-tap-test-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let band = try calibrationBand()
+    let key = "voca.tap-calibration.v1.18.1.1.0"
+    for invalid in ["true", "null", "\"1\"", "-1", "0", "0.74", "3.01", "1e400", "invalid"] {
+        defaults.set(Data(invalid.utf8), forKey: key)
+        var check = BandTapCalibration()
+        let restoredCorrupt = check.restore(for: band, defaults: defaults)
+        #expect(!restoredCorrupt)
+        #expect(check.phase == .idle)
+        #expect(check.settlingInterval == nil)
+    }
+}
+
+@Test func restoringCalibrationDoesNotReplayTapFromPreviousConnection() throws {
+    let suite = "voca-tap-test-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let band = try calibrationBand()
+    var check = beginDoubleCheck()
+    check.receive(milliseconds: 3_000, code: 2, at: calibrationEpoch.addingTimeInterval(3))
+    let finished = check.finishDouble(at: calibrationEpoch.addingTimeInterval(5))
+    #expect(finished)
+    #expect(check.save(for: band, defaults: defaults))
+    var gate = BandCueTrigger()
+    let enabled = gate.enableVerifiedMapping(settlingInterval: try #require(check.settlingInterval))
+    #expect(enabled)
+    gate.receive(milliseconds: 4_000, code: 1, at: calibrationEpoch.addingTimeInterval(6), ready: true)
+    gate.reset()
+    let restored = check.restore(for: band, defaults: defaults)
+    #expect(restored)
+    let enabledAfterReconnect = gate.enableVerifiedMapping(settlingInterval: try #require(check.settlingInterval))
+    #expect(enabledAfterReconnect)
+    let pendingReplayed = gate.consume(at: calibrationEpoch.addingTimeInterval(10), ready: true)
+    #expect(!pendingReplayed)
+    gate.receive(milliseconds: 1, code: 1, at: calibrationEpoch.addingTimeInterval(11), ready: true)
+    let firstTap = gate.consume(at: calibrationEpoch.addingTimeInterval(12), ready: true)
+    #expect(firstTap)
+    let replayed = gate.consume(at: calibrationEpoch.addingTimeInterval(13), ready: true)
+    #expect(!replayed)
+}

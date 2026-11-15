@@ -54,6 +54,11 @@ for path in sorted([*(ROOT / 'Resources').rglob('*.json'), ROOT / 'config/models
     ref = obj(name, isa='PBXFileReference', lastKnownFileType='text.json', path=name, sourceTree='<group>')
     files.append(ref)
     resources.append(obj(name + '-build', isa='PBXBuildFile', fileRef=ref))
+for path in sorted([*(ROOT / 'Voca').glob('*.xcassets'), ROOT / 'Resources/Icons/Phosphor-LICENSE.txt']):
+    name = str(path.relative_to(ROOT))
+    ref = obj(name, isa='PBXFileReference', lastKnownFileType='folder.assetcatalog' if path.suffix == '.xcassets' else 'text', path=name, sourceTree='<group>')
+    files.append(ref)
+    resources.append(obj(name + '-build', isa='PBXBuildFile', fileRef=ref))
 python_ref = obj('Python-framework', isa='PBXFileReference', lastKnownFileType='wrapper.xcframework', path='.build/pipecat-ios/Vendor/Python.xcframework', sourceTree='<group>')
 files.append(python_ref)
 linked.append(obj('Python-link', isa='PBXBuildFile', fileRef=python_ref))

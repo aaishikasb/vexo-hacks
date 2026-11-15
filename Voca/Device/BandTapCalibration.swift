@@ -18,6 +18,36 @@ nonisolated struct BandTapCalibration {
 
     mutating func reset() { self = Self() }
 
+    /// A completed check belongs to this assigned band and firmware, not to its BLE connection.
+    @discardableResult func save(for band: BandProtocol.Info, defaults: UserDefaults = .standard) -> Bool {
+        guard phase == .complete, (1...999).contains(band.number), band.supportsEvents,
+              let settlingInterval, Self.validSavedInterval(settlingInterval),
+              let data = try? JSONEncoder().encode(settlingInterval) else { return false }
+        defaults.set(data, forKey: Self.storageKey(for: band))
+        return true
+    }
+
+    @discardableResult mutating func restore(for band: BandProtocol.Info, defaults: UserDefaults = .standard) -> Bool {
+        reset()
+        guard (1...999).contains(band.number), band.supportsEvents,
+              let data = defaults.data(forKey: Self.storageKey(for: band)),
+              let interval = try? JSONDecoder().decode(TimeInterval.self, from: data),
+              Self.validSavedInterval(interval) else { return false }
+        settlingInterval = interval
+        singleObserved = true; doubleObserved = true
+        phase = .complete
+        status = "Tap calibration saved. A single tap requests a cue."
+        return true
+    }
+
+    private static func validSavedInterval(_ interval: TimeInterval) -> Bool {
+        interval.isFinite && (0.75...3).contains(interval)
+    }
+
+    private static func storageKey(for band: BandProtocol.Info) -> String {
+        "voca.tap-calibration.v1.\(band.number).\(band.firmware)"
+    }
+
     mutating func startSingle(at now: Date) {
         reset()
         phase = .single

@@ -23,9 +23,23 @@ nonisolated enum TastePreference: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+nonisolated enum FeedbackIssue: String, Codable, CaseIterable, Identifiable {
+    case wrongFacts, wrongMoment, wrongStrategy, wrongWording
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .wrongFacts: "Wrong facts"
+        case .wrongMoment: "Wrong moment"
+        case .wrongStrategy: "Wrong strategy"
+        case .wrongWording: "Wrong wording"
+        }
+    }
+}
+
 nonisolated struct TasteNote: Codable, Equatable {
     var decisionID: UUID
-    var feedbackID: UUID
+    var feedbackID: UUID?
+    var issue: FeedbackIssue? = nil
     var reasons: [TastePreference]
     var alternative: String
     var approvedExample: Bool
@@ -58,24 +72,28 @@ nonisolated struct TasteGuidance: Sendable {
         state = next; loaded = true
     }
     func note(for episode: Episode) -> TasteNote? {
-        guard episode.decision.context.mode == .live, episode.delivery == .completed,
-              [.helpful, .unhelpful].contains(episode.feedback?.verdict) else { return nil }
-        return state.notes.first { $0.decisionID == episode.id && $0.feedbackID == episode.feedback?.id }
+        guard episode.decision.context.mode == .live, episode.delivery == .completed else { return nil }
+        return state.notes.first { $0.decisionID == episode.id && ($0.feedbackID == nil || $0.feedbackID == episode.feedback?.id) }
     }
-    func save(episode: Episode, reasons: [TastePreference], alternative: String, approvedExample: Bool) throws {
-        guard loaded, episode.decision.context.mode == .live, episode.delivery == .completed, let feedback = episode.feedback,
-              [.helpful, .unhelpful].contains(feedback.verdict), alternative.count <= 240,
+    func save(episode: Episode, reasons: [TastePreference], alternative: String, approvedExample: Bool, issue: FeedbackIssue? = nil) throws {
+        guard loaded, episode.decision.context.mode == .live, episode.delivery == .completed,
+              (issue != nil || [.helpful, .unhelpful].contains(episode.feedback?.verdict)), alternative.count <= 240,
               !alternative.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw Failure.invalid }
         let text = alternative.trimmingCharacters(in: .whitespacesAndNewlines)
         var next = state
         next.notes.removeAll { $0.decisionID == episode.id }
-        next.notes.append(TasteNote(decisionID: episode.id, feedbackID: feedback.id,
-            reasons: TastePreference.allCases.filter { reasons.contains($0) }, alternative: text,
-            approvedExample: approvedExample && !text.isEmpty))
+        next.notes.append(TasteNote(decisionID: episode.id, feedbackID: episode.feedback?.id, issue: issue,
+            reasons: issue == nil || issue == .wrongWording ? TastePreference.allCases.filter { reasons.contains($0) } : [], alternative: text,
+            approvedExample: (issue == nil || issue == .wrongWording) && approvedExample && !text.isEmpty))
         try persist(next)
     }
+    private func styleNote(for episode: Episode) -> TasteNote? {
+        guard let note = note(for: episode), note.issue == nil || note.issue == .wrongWording,
+              ![FeedbackVerdict.invalidEvidence, .notTried].contains(episode.feedback?.verdict) else { return nil }
+        return note
+    }
     func enabled(_ preference: TastePreference, episodes: [Episode]) -> Bool {
-        state.overrides[preference.rawValue] ?? episodes.contains { note(for: $0)?.reasons.contains(preference) == true }
+        state.overrides[preference.rawValue] ?? episodes.contains { styleNote(for: $0)?.reasons.contains(preference) == true }
     }
     func set(_ preference: TastePreference, enabled: Bool) throws {
         var next = state; next.overrides[preference.rawValue] = enabled; try persist(next)
@@ -84,7 +102,7 @@ nonisolated struct TasteGuidance: Sendable {
         let instructions = TastePreference.allCases.filter { enabled($0, episodes: episodes) }.map(\.instruction)
         let examples = episodes.filter { $0.decision.context.goal == goal }.sorted {
             $0.decision.context.requestedAt < $1.decision.context.requestedAt
-        }.compactMap { note(for: $0) }.filter(\.approvedExample).suffix(2).map(\.alternative)
+        }.compactMap { styleNote(for: $0) }.filter(\.approvedExample).suffix(2).map(\.alternative)
         return TasteGuidance(instructions: instructions, examples: Array(examples))
     }
     func prune(episodes: [Episode]) throws {
