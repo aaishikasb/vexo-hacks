@@ -10,12 +10,16 @@ import VocaCore
     private var audio: NativeAudio?
     private var requestID: UUID?
     private var completion: CheckedContinuation<Void, Error>?
+    private var requestStarted: (() -> Void)?
     private var playback: Task<Void, Never>?
     private var watchdog: Task<Void, Never>?
     private var started = false
     private var turnID: UUID?
     private var turnCompletion: CheckedContinuation<Void, Error>?
     private var turnTimeout: Task<Void, Never>?
+    private var bandID: UUID?
+    private var bandCompletion: CheckedContinuation<Void, Error>?
+    private var bandTimeout: Task<Void, Never>?
 
     func start(audio: NativeAudio) {
         guard !started else { return }
@@ -27,12 +31,13 @@ import VocaCore
         }
     }
 
-    func speak(_ text: String) async throws {
+    func speak(_ text: String, onStarted: (() -> Void)? = nil) async throws {
         guard ready else { throw Failure.notReady }
         guard completion == nil else { throw NativeAudio.Failure.busy }
         try Task.checkCancellation()
         let id = UUID()
         requestID = id
+        requestStarted = onStarted
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 completion = continuation
@@ -50,23 +55,55 @@ import VocaCore
 
     /// Pipecat receives a final recognition frame before Swift schedules Gemma.
     func acceptPracticeTurn(_ turn: VocaCore.PracticeTurn) async throws {
-        guard ready, turn.isFinal, turnCompletion == nil else { throw Failure.notReady }
+        guard turn.isFinal else { throw Failure.notReady }
+        try await acceptTranscript(id: turn.id, sessionID: turn.sessionID, text: turn.text,
+                                   timestamp: turn.utteredAt, type: "practiceTurn")
+    }
+
+    func acceptBandTranscript(id: UUID, sessionID: UUID, text: String, capturedAt: Date) async throws {
+        guard ready, bandCompletion == nil, !text.isEmpty, text.count <= 2000 else { throw Failure.notReady }
         try Task.checkCancellation()
-        turnID = turn.id
+        bandID = id
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                bandCompletion = continuation
+                send(["type": "bandTranscript", "requestID": id.uuidString.lowercased(),
+                      "sessionID": sessionID.uuidString.lowercased(), "text": text,
+                      "timestamp": capturedAt.ISO8601Format()])
+                bandTimeout = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled, self?.bandID == id else { return }
+                    self?.finishBand(.failure(Failure.notReady))
+                }
+            }
+        } onCancel: { Task { @MainActor [weak self] in
+            if self?.bandID == id { self?.finishBand(.failure(CancellationError())) }
+        } }
+    }
+    private func finishBand(_ result: Result<Void, Error>) {
+        bandTimeout?.cancel(); bandTimeout = nil
+        let pending = bandCompletion; bandCompletion = nil; bandID = nil
+        pending?.resume(with: result)
+    }
+
+    private func acceptTranscript(id: UUID, sessionID: UUID, text: String, timestamp: Date, type: String) async throws {
+        guard ready, turnCompletion == nil, !text.isEmpty, text.count <= 2000 else { throw Failure.notReady }
+        try Task.checkCancellation()
+        turnID = id
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 turnCompletion = continuation
-                send(["type": "practiceTurn", "requestID": turn.id.uuidString.lowercased(),
-                      "sessionID": turn.sessionID.uuidString.lowercased(), "generation": String(turn.generation),
-                      "text": turn.text, "timestamp": turn.utteredAt.ISO8601Format()])
+                send(["type": type, "requestID": id.uuidString.lowercased(),
+                      "sessionID": sessionID.uuidString.lowercased(),
+                      "text": text, "timestamp": timestamp.ISO8601Format()])
                 turnTimeout = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(5))
-                    guard !Task.isCancelled, self?.turnID == turn.id else { return }
+                    guard !Task.isCancelled, self?.turnID == id else { return }
                     self?.finishTurn(.failure(Failure.notReady))
                 }
             }
         } onCancel: { Task { @MainActor [weak self] in
-            if self?.turnID == turn.id { self?.finishTurn(.failure(CancellationError())) }
+            if self?.turnID == id { self?.finishTurn(.failure(CancellationError())) }
         } }
     }
     private func finishTurn(_ result: Result<Void, Error>) {
@@ -93,6 +130,10 @@ import VocaCore
     private func receive(_ json: String) {
         guard let data = json.data(using: .utf8),
               let event = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+        if event["type"] == "bandTranscriptAccepted" {
+            if let rawID = event["requestID"], UUID(uuidString: rawID) == bandID { finishBand(.success(())) }
+            return
+        }
         if event["type"] == "practiceTurnAccepted" {
             if let rawID = event["requestID"], UUID(uuidString: rawID) == turnID { finishTurn(.success(())) }
             return
@@ -100,6 +141,7 @@ import VocaCore
         if event["type"] == "ready" { ready = true; status = "Embedded Pipecat ready"; return }
         if event["type"] == "error" {
             ready = false
+            finishBand(.failure(Failure.notReady))
             stop()
             status = "Pipecat failed to start. Restart Voca after checking the runtime build."
             return
@@ -116,7 +158,7 @@ import VocaCore
             guard playback == nil, let text = event["text"], let audio else { return }
             playback = Task { [weak self] in
                 let outcome: String
-                do { try await audio.speak(text); outcome = "completed" }
+                do { try await audio.speak(text, onStarted: self?.requestStarted); outcome = "completed" }
                 catch is CancellationError { outcome = "cancelled" }
                 catch { outcome = "failed"; self?.status = error.localizedDescription }
                 guard let self, self.requestID == id else { return }
@@ -134,7 +176,7 @@ import VocaCore
     private func finish(_ result: Result<Void, Error>) {
         watchdog?.cancel(); watchdog = nil
         let pending = completion
-        completion = nil; requestID = nil; playback = nil
+        completion = nil; requestID = nil; playback = nil; requestStarted = nil
         pending?.resume(with: result)
     }
 

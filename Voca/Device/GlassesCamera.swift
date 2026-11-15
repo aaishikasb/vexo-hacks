@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import MWDATCore
 import MWDATCamera
 import Observation
@@ -18,6 +19,8 @@ import Observation
     private var captureTimeout: Task<Void, Never>?
     private var generation = 0
     private var captureRequestedAt: Date?
+    private var awaitingStreamFrame = false
+    private(set) var lastCaptureKind = "stillPhoto"
     private var configured = false
     enum Failure: LocalizedError {
         case notReady, busy, interrupted, timeout, notRegistered, unavailable, deviceUpdate, sdkUpdate
@@ -34,6 +37,14 @@ import Observation
             }
         }
     }
+    /// DAT identifies the connected glasses; AVAudioSession supplies the selected output identity.
+    var connectedGlassesNames: [String] {
+        guard configured else { return [] }
+        return Wearables.shared.devices.compactMap { Wearables.shared.deviceForIdentifier($0) }
+            .filter { $0.linkState == .connected && [.rayBanMeta, .metaRayBanDisplay, .rayBanMetaOptics].contains($0.deviceType()) }
+            .map(\.name)
+    }
+
     func configure() throws {
         guard !configured else { return }
         try Wearables.configure()
@@ -139,14 +150,23 @@ import Observation
                     self.status = self.ready ? "Glasses camera ready" : "Camera: \(state)"
                 }
             }.store(in: streamTokens)
+            camera.stream.videoFramePublisher.listen { [weak self] frame in
+                let receivedAt = Date()
+                Task { @MainActor in
+                    guard let self, current == self.generation, self.awaitingStreamFrame,
+                          self.capture != nil, let requestedAt = self.captureRequestedAt,
+                          receivedAt >= requestedAt,
+                          let jpeg = frame.makeUIImage()?.jpegData(compressionQuality: 0.85) else { return }
+                    // Receipt time is approximate; never reuse a frame received before this request.
+                    self.lastCaptureKind = "nextStreamFrame"
+                    self.completeCapture(jpeg, observedAt: receivedAt)
+                }
+            }.store(in: streamTokens)
             camera.stream.photoDataPublisher.listen { [weak self] photo in
                 Task { @MainActor in
-                    guard let self, current == self.generation, let capture = self.capture else { return }
-                    self.capture = nil
-                    self.captureTimeout?.cancel()
-                    self.previewJPEG = photo.data
-                    capture.resume(returning: (photo.data, self.captureRequestedAt ?? Date()))
-                    self.captureRequestedAt = nil
+                    guard let self, current == self.generation, self.capture != nil, !self.awaitingStreamFrame else { return }
+                    self.lastCaptureKind = "stillPhoto"
+                    self.completeCapture(photo.data, observedAt: self.captureRequestedAt ?? Date())
                 }
             }.store(in: streamTokens)
             camera.stream.errorPublisher.listen { [weak self] error in
@@ -158,22 +178,44 @@ import Observation
             camera.stream.start()
         } catch { stop(); status = error.localizedDescription }
     }
-    func photo() async throws -> (Data, Date) {
+    private func completeCapture(_ jpeg: Data, observedAt: Date) {
+        guard let capture else { return }
+        self.capture = nil; awaitingStreamFrame = false
+        captureRequestedAt = nil; captureTimeout?.cancel()
+        previewJPEG = jpeg
+        capture.resume(returning: (jpeg, observedAt))
+    }
+    private func requestStillPhoto() {
+        awaitingStreamFrame = false
+        guard let capture else { return }
+        captureRequestedAt = Date()
+        guard camera?.stream.capturePhoto(format: .jpeg) == true else {
+            self.capture = nil; captureRequestedAt = nil
+            capture.resume(throwing: Failure.notReady)
+            return
+        }
+        captureTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            self?.stop(); self?.status = Failure.timeout.localizedDescription
+        }
+    }
+    func photo(preferStreamFrame: Bool = false) async throws -> (Data, Date) {
+        try Task.checkCancellation()
         guard ready else { throw Failure.notReady }
         guard capture == nil else { throw Failure.busy }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 captureRequestedAt = Date()
                 capture = continuation
-                guard camera?.stream.capturePhoto(format: .jpeg) == true else {
-                    capture = nil; continuation.resume(throwing: Failure.notReady); return
-                }
-                captureTimeout = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(10))
-                    guard !Task.isCancelled else { return }
-                    self?.stop()
-                    self?.status = Failure.timeout.localizedDescription
-                }
+                awaitingStreamFrame = preferStreamFrame
+                if preferStreamFrame {
+                    captureTimeout = Task { [weak self] in
+                        try? await Task.sleep(for: .milliseconds(250))
+                        guard !Task.isCancelled, let self, self.awaitingStreamFrame else { return }
+                        self.requestStillPhoto()
+                    }
+                } else { requestStillPhoto() }
             }
         } onCancel: { Task { @MainActor [weak self] in self?.stop() } }
     }
@@ -188,7 +230,7 @@ import Observation
         permissionTask?.cancel(); permissionTask = nil
         captureTimeout?.cancel()
         capture?.resume(throwing: Failure.interrupted)
-        capture = nil; captureRequestedAt = nil
+        capture = nil; captureRequestedAt = nil; awaitingStreamFrame = false
         camera?.stop(); camera = nil
         session?.stop(); session = nil
         sessionTokens.clear(); streamTokens.clear()

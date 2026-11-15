@@ -62,6 +62,57 @@ import VocaCore
         }
     }
 
+    static func checkPractice(models: ModelLibrary) async {
+        var result: [String: Any] = ["fixture": true, "protocol": "practice-context-v2", "checks": []]
+        do {
+            try await models.load(modelID: "gemma4E4B")
+            let model = RecordingModel(base: models.executor)
+            let profile = try await model.activeProfile()
+            let scenario = PracticeScenario(id: "practice-check", title: "Meetup", setting: .event, goal: .enter,
+                openingLine: "We were comparing talks.", partnerInstructions: "You attended a talk about urban gardens.", principleIDs: [])
+            var context = PracticeContext()
+            context.set(.audience, quote: "A technical founder")
+            context.set(.relationship, quote: "We just met")
+            context.set(.topic, quote: "My plant-watering robot")
+            context.set(.goal, quote: "Tell a clear story about why I built it")
+            let cases: [(String, [(text: String, fromUser: Bool)])] = [
+                ("brief-opening", []),
+                ("audience-correction", [("Actually, this founder is not technical. Please help me explain my plant-watering robot without jargon.", true)]),
+                ("retained-after-window", (0..<14).map { ("We are still discussing the project, turn \($0).", $0.isMultiple(of: 2)) } +
+                    [("How would you explain the idea to this person?", true)]),
+                ("brief-answer", [("I was curious.", true)])
+            ]
+            var checks: [[String: Any]] = []
+            for (stage, messages) in cases {
+                let start = Date()
+                let request = try context.request(scenario: scenario, direction: "",
+                    messages: messages, profile: profile)
+                let latestUserText = messages.last(where: \.fromUser)?.text ?? ""
+                let generated = try await ValidatedGeneration.run(request, model: model) {
+                    try PracticeContext.decode($0, latestUserText: latestUserText)
+                }
+                if !latestUserText.isEmpty {
+                    let turn = PracticeTurn(id: UUID(), sessionID: UUID(), generation: 0, text: latestUserText, isFinal: true)
+                    context.apply(generated.value.updates, turn: turn, profile: generated.profile)
+                }
+                checks.append(["stage": stage, "reply": generated.value.text,
+                               "updatedFields": generated.value.updates.map { $0.field.rawValue },
+                               "retainedAudience": context.entries[.audience]?.quote ?? "",
+                               "seconds": Date().timeIntervalSince(start), "model": generated.profile.modelID.rawValue])
+                result["checks"] = checks
+                if stage == "audience-correction" || stage == "retained-after-window" {
+                    guard context.entries[.audience]?.quote.contains("not technical") == true else {
+                        result["error"] = "Audience correction was not retained in the audience field."
+                        break
+                    }
+                }
+            }
+        } catch { result["error"] = error.localizedDescription }
+        if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: URL.documentsDirectory.appending(path: "practice-model-check.json"), options: .atomic)
+        }
+    }
+
     static func run(models: ModelLibrary) async {
         var result: [String: Any] = ["fixture": true, "auditPassed": false, "practicePassed": false]
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)

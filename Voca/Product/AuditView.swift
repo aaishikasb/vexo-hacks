@@ -12,107 +12,107 @@ struct AuditView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var work: Task<Void, Never>?
+    @State private var addingEvidence = false
+    @FocusState private var excerptFocused: Bool
     private var report: AuditReport? { store.audits.first { $0.decisionID == episode.id } }
     private var dialogue: [Evidence] { store.dialogue(for: episode) }
     private var hasWearerEvidence: Bool { dialogue.contains { $0.speaker == "wearer" && !$0.text.isEmpty } }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("A moment to reflect.").font(.largeTitle.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    if let cue = episode.cue { Text(cue.text).font(.title3).fixedSize(horizontal: false, vertical: true) }
-                    Text(episode.decision.context.requestedAt, format: .dateTime.month().day().hour().minute())
-                        .font(.caption).foregroundStyle(VocaTheme.secondary)
+            VStack(alignment: .leading, spacing: 24) {
+                Text(episode.decision.context.requestedAt, format: .dateTime.month().day().hour().minute())
+                    .font(.caption).foregroundStyle(VocaTheme.secondary)
+                if let cue = episode.cue {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Your cue").font(.caption.weight(.medium)).foregroundStyle(VocaTheme.secondary)
+                        Text(cue.text).font(.title3).lineSpacing(4).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 cueInfluences
-                if let report, report.status == .ready {
-                    reportSection("A strength in your words", text: report.strength)
-                    reportSection("Something you could try", text: report.opportunity)
-                    reportSection("One small exercise", text: report.exercise)
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Based on your words").font(.headline).accessibilityAddTraits(.isHeader)
-                        ForEach(dialogue.filter { report.sourceIDs.contains($0.sourceID) }) { evidence in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(evidence.text).textSelection(.enabled)
-                                Text(evidence.sourceID).font(.caption2).foregroundStyle(VocaTheme.secondary).textSelection(.enabled)
-                            }
-                        }
-                        if let profile = report.generationProfile {
-                            Text("Reviewed with \(profile.modelID == .gemma4E4B ? "E4B" : "E2B") on this iPhone")
-                                .font(.caption).foregroundStyle(VocaTheme.secondary)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(hasWearerEvidence ? "Ready to reflect" : "Waiting for transcript").font(.title2.weight(.semibold))
-                        Text(hasWearerEvidence ? "Your confirmed words are ready. Review them for one strength, one possibility to explore, and one short exercise." : "A photo or a cue cannot tell us how the conversation went. Add a real excerpt and confirm which words were yours to get a grounded review.")
-                            .foregroundStyle(VocaTheme.secondary)
-                    }
-                }
-                if !dialogue.isEmpty {
-                    DisclosureGroup("Conversation evidence (\(dialogue.count))") {
-                        VStack(alignment: .leading, spacing: 16) {
-                            ForEach(dialogue) { item in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(item.text)
-                                    Text(item.speaker == "wearer" ? "Confirmed as your words" : "Speaker: \(item.speaker ?? "unknown")")
-                                        .font(.caption).foregroundStyle(VocaTheme.secondary)
-                                    if item.utteredAt == nil { Text("Utterance time unknown").font(.caption).foregroundStyle(VocaTheme.secondary) }
-                                }
-                            }
-                        }.padding(.top, 12)
-                    }
-                }
-                DisclosureGroup("Add real conversation evidence") {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("An exact excerpt from this conversation").font(.headline)
-                        TextField("What was actually said", text: $text, axis: .vertical).lineLimit(3...8)
-                            .textFieldStyle(.roundedBorder).accessibilityLabel("Real conversation excerpt, up to 500 characters")
-                        Text("\(text.count) / 500 characters").font(.caption).foregroundStyle(VocaTheme.secondary)
-                        Text("Who said this?").font(.subheadline)
-                        Menu {
-                            Picker("Who said this?", selection: $speaker) {
-                                Text("I’m not sure").tag("unknown")
-                                Text("I said these words").tag("wearer")
-                                Text("Someone else").tag("other")
-                            }
-                        } label: {
-                            HStack(alignment: .top) {
-                                Text(speaker == "wearer" ? "I said these words" : speaker == "other" ? "Someone else" : "I’m not sure")
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 8)
-                                Image(systemName: "chevron.up.chevron.down").accessibilityHidden(true)
-                            }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }.buttonStyle(.bordered).accessibilityLabel("Who said this?")
-                        Toggle("This is a real excerpt from this conversation, not practice or invented text", isOn: $confirmed)
-                        Text("Saved as a partial excerpt with unknown utterance time. This does not become a shareable memory.")
-                            .font(.footnote).foregroundStyle(VocaTheme.secondary)
-                        Button("Save conversation evidence") {
-                            do {
-                                try store.addDialogue(text: text, speaker: speaker == "unknown" ? nil : speaker,
-                                                      utteredAt: nil, decisionID: episode.id)
-                                text = ""; confirmed = false; speaker = "unknown"; error = nil
-                            } catch { self.error = error.localizedDescription }
-                        }.buttonStyle(.bordered)
-                            .disabled(!confirmed || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.count > 500 || busy || !store.loaded)
-                    }.padding(.top, 16)
+                if let cue = episode.cue {
+                    DisclosureGroup("Cue details") {
+                        Text(cue.actualProfile.modelID == .gemma4E4B ? "E4B · processed on this iPhone" : "E2B fallback · processed on this iPhone")
+                            .font(.caption).foregroundStyle(VocaTheme.secondary).padding(.top, 8)
+                    }.font(.subheadline)
                 }
                 if busy {
-                    ProgressView("Reviewing your words…")
-                    Button("Cancel review", role: .cancel) { work?.cancel() }.buttonStyle(.bordered)
+                    VStack(spacing: 4) {
+                        CueWave(active: true)
+                        Text("Reviewing your words…").font(.subheadline).foregroundStyle(VocaTheme.secondary)
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }.frame(maxWidth: .infinity)
+                } else if let report, report.status == .ready {
+                    VStack(alignment: .leading, spacing: 24) {
+                        reportSection("What worked", symbol: "checkmark", text: report.strength)
+                        reportSection("What to try", symbol: "arrow.up.right", text: report.opportunity)
+                        reportSection("Practice this", symbol: "bubble.left.and.bubble.right", text: report.exercise)
+                    }.vocaSurface()
+                    DisclosureGroup("Based on your words") {
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(dialogue.filter { report.sourceIDs.contains($0.sourceID) }) { evidence in
+                                Text(evidence.text).lineSpacing(4).textSelection(.enabled)
+                            }
+                            if let profile = report.generationProfile {
+                                Text("Reviewed with \(profile.modelID == .gemma4E4B ? "E4B" : "E2B") on this iPhone")
+                                    .font(.caption).foregroundStyle(VocaTheme.secondary)
+                            }
+                        }.padding(.top, 16)
+                    }.font(.subheadline)
                 } else {
-                    Button(report?.status == .ready ? "Review again" : "Review this conversation") { generate() }
-                        .buttonStyle(VocaPrimaryButton()).disabled(!canGenerate || !store.loaded)
+                    VocaEmptyState(symbol: "text.bubble", title: hasWearerEvidence ? "Ready to review" : "Add your words",
+                                   detail: hasWearerEvidence ? "Find one strength and something to try next." : "Add a conversation excerpt to get a grounded review.")
                 }
-                if !canGenerate { Text("Prepare on-device guidance in Session, then return to this review.").font(.subheadline) }
-                if let error { Label(error, systemImage: "exclamationmark.circle").font(.subheadline) }
-                Text("A review is a suggestion based on limited evidence, not a score. It never changes your learning rewards. You can delete evidence and its review in Memory.")
-                    .font(.footnote).foregroundStyle(VocaTheme.secondary)
+                if !dialogue.isEmpty {
+                    DisclosureGroup("Conversation excerpts (\(dialogue.count))") {
+                        VStack(alignment: .leading, spacing: 20) {
+                            ForEach(dialogue) { item in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(item.text).lineSpacing(4).textSelection(.enabled)
+                                    Text(item.speaker == "wearer" ? "Your words" : item.speaker == "other" ? "Someone else’s words" : "Speaker unknown")
+                                        .font(.caption).foregroundStyle(VocaTheme.secondary)
+                                    if item.utteredAt == nil { Text("Time unknown").font(.caption).foregroundStyle(VocaTheme.secondary) }
+                                }
+                            }
+                        }.padding(.top, 16)
+                        Text("Delete excerpts and their reviews in Memory.")
+                            .font(.caption).foregroundStyle(VocaTheme.secondary).padding(.top, 12)
+                    }.font(.subheadline)
+                }
+                if let error {
+                    PhosphorLabel(error, icon: "exclamationmark.circle").font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
-        }.background(VocaTheme.background).foregroundStyle(VocaTheme.foreground)
-            .scrollDismissesKeyboard(.interactively)
-            .onDisappear { work?.cancel() }
+        }
+        .background(VocaTheme.background).foregroundStyle(VocaTheme.foreground)
+        .navigationTitle("Review").navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 12) {
+                if busy {
+                    Button("Cancel review", role: .cancel) { work?.cancel() }.buttonStyle(VocaSecondaryButton())
+                } else if !hasWearerEvidence {
+                    Button { addingEvidence = true } label: {
+                        PhosphorLabel("Add excerpt", icon: "plus")
+                    }.buttonStyle(VocaPrimaryButton()).disabled(!store.loaded)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { reviewActions.fixedSize() }
+                        VStack(alignment: .leading, spacing: 12) { reviewActions }
+                    }
+                }
+                if !canGenerate {
+                    Text("Prepare guidance in Settings to review this conversation.")
+                        .font(.footnote).foregroundStyle(VocaTheme.secondary)
+                }
+            }.padding(.horizontal, 24).padding(.vertical, 12)
+                .frame(maxWidth: 640).frame(maxWidth: .infinity).background(VocaTheme.background)
+        }
+        .sheet(isPresented: $addingEvidence) { evidenceSheet }
+        .onChange(of: error) { _, message in
+            if let message { UIAccessibility.post(notification: .announcement, argument: message) }
+        }
+        .onDisappear { work?.cancel() }
     }
 
     private var cueInfluences: some View {
@@ -196,11 +196,69 @@ struct AuditView: View {
         }
     }
 
-    private func reportSection(_ title: String, text: String?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-            Text(text ?? "").font(.title3).fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder private var reviewActions: some View {
+        Button(report?.status == .ready ? "Review again" : "Review") { generate() }
+            .buttonStyle(VocaPrimaryButton()).disabled(!canGenerate || !store.loaded)
+        Button { addingEvidence = true } label: {
+            PhosphorLabel("Add excerpt", icon: "plus")
+        }.buttonStyle(VocaSecondaryButton()).disabled(!store.loaded)
+    }
+
+    private var evidenceSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Conversation excerpt").font(.headline)
+                        TextField("For example, I started gardening last spring.", text: $text, axis: .vertical)
+                            .lineLimit(3...8).focused($excerptFocused)
+                            .padding(16).background(VocaTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(VocaTheme.secondary, lineWidth: 1))
+                            .accessibilityLabel("Conversation excerpt, up to 500 characters")
+                        Text("\(text.count) / 500 characters").font(.caption).monospacedDigit().foregroundStyle(VocaTheme.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Who said this?").font(.headline)
+                        Picker("Who said this?", selection: $speaker) {
+                            Text("I’m not sure").tag("unknown")
+                            Text("I said these words").tag("wearer")
+                            Text("Someone else").tag("other")
+                        }.pickerStyle(.inline).labelsHidden()
+                    }
+                    Toggle("This is a real excerpt from this conversation", isOn: $confirmed)
+                    Text("Excerpts are saved with an unknown time. They don’t become shareable memories. Use only real dialogue, never practice or invented text.")
+                        .font(.footnote).foregroundStyle(VocaTheme.secondary)
+                    if let error { PhosphorLabel(error, icon: "exclamationmark.circle").font(.subheadline) }
+                    Button("Save excerpt") { saveEvidence() }.buttonStyle(VocaPrimaryButton())
+                        .disabled(busy || !store.loaded)
+                }.padding(24).frame(maxWidth: 640).frame(maxWidth: .infinity)
+            }.background(VocaTheme.background).foregroundStyle(VocaTheme.foreground)
+                .scrollDismissesKeyboard(.interactively)
+                .navigationTitle("Add an excerpt").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { addingEvidence = false; error = nil }
+                } }
         }
+    }
+
+    private func saveEvidence() {
+        guard confirmed else { error = "Confirm that this is real dialogue from this conversation, then save again."; return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 500 else {
+            error = "Enter an excerpt of 1–500 characters, then save again."; excerptFocused = true; return
+        }
+        do {
+            try store.addDialogue(text: text, speaker: speaker == "unknown" ? nil : speaker,
+                                  utteredAt: nil, decisionID: episode.id)
+            text = ""; confirmed = false; speaker = "unknown"; error = nil; addingEvidence = false
+        } catch { self.error = "The excerpt couldn’t be saved. Try again. \(error.localizedDescription)" }
+    }
+
+    private func reportSection(_ title: String, symbol: String, text: String?) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PhosphorLabel(title, icon: symbol).font(.subheadline.weight(.medium)).foregroundStyle(VocaTheme.secondary)
+                .accessibilityAddTraits(.isHeader)
+            Text(text ?? "").font(.body).lineSpacing(4).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func generate() {

@@ -10,17 +10,23 @@ import Synchronization
         var errorDescription: String? {
             switch self {
             case .practiceRoute: "Choose an audio output, then start practice again. Voca stopped because the selected route is unavailable."
-            case .route: "Select your glasses in the iPhone audio output picker, then confirm the route before speaking."
+            case .route: "Check the selected audio output, then request the cue again."
             case .interrupted: "Speech stopped because playback was interrupted or the output route changed."
             case .busy: "Wait for speech to finish or stop it first."
             }
         }
     }
-    private(set) var status = "No glasses audio route confirmed"
+    private(set) var status = "Choose an audio output"
+    private(set) var currentOutput = ""
+    private(set) var routeIsValid = false
+    private(set) var outputNeedingApproval: AudioRouteApproval.Output?
     private(set) var speaking = false
     private let synthesizer = AVSpeechSynthesizer()
     private let session = AVAudioSession.sharedInstance()
-    private var routeUID: String?
+    private var approvals = AudioRouteApproval()
+    private var glassesConnected = false
+    private var glassesNames: [String] = []
+    private var speechOutputUID: String?
     private var practiceOutputUID: String?
     private var captureEngine: AVAudioEngine?
     private var captureGeneration = 0
@@ -29,6 +35,7 @@ import Synchronization
     private nonisolated let callbackIDs = Mutex<[ObjectIdentifier: UUID]>([:])
     private var completion: CheckedContinuation<Void, Error>?
     var onPlaybackStarted: (() -> Void)?
+    private var requestStarted: (() -> Void)?
     var onInterruption: (() -> Void)?
 
     override init() {
@@ -36,41 +43,66 @@ import Synchronization
         synthesizer.delegate = self
         NotificationCenter.default.addObserver(self, selector: #selector(routeChanged), name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(interrupted), name: AVAudioSession.interruptionNotification, object: nil)
+        refreshOutput()
     }
-    var currentOutput: String { session.currentRoute.outputs.map(\.portName).joined(separator: ", ") }
-    func confirmGlassesRoute() throws {
-        practiceOutputUID = nil
-        let outputs = session.currentRoute.outputs
-        guard outputs.count == 1, let output = outputs.first,
-              [.bluetoothA2DP, .bluetoothHFP, .bluetoothLE].contains(output.portType) else { throw Failure.route }
-        routeUID = output.uid
-        status = "Confirmed output: \(output.portName)"
+    private var outputs: [AudioRouteApproval.Output] {
+        session.currentRoute.outputs.map {
+            AudioRouteApproval.Output(id: $0.uid, name: $0.portName,
+                                      isBluetooth: [.bluetoothA2DP, .bluetoothHFP, .bluetoothLE].contains($0.portType))
+        }
     }
-    func activate(capture: Bool = false) throws {
+
+    func refreshGlassesConnection(connected: Bool, names: [String]) {
+        glassesConnected = connected
+        glassesNames = names
+        refreshOutput()
+    }
+
+    func confirmOutput(id: String) throws {
+        guard approvals.approve(id: id, currentOutputs: outputs) else {
+            refreshOutput()
+            throw Failure.route
+        }
+        refreshOutput()
+    }
+
+    private func refreshOutput() {
+        let current = outputs
+        approvals.recognizeGlasses(in: current, connected: glassesConnected, names: glassesNames)
+        currentOutput = current.map(\.name).joined(separator: ", ")
+        routeIsValid = approvals.accepts(current)
+        outputNeedingApproval = !routeIsValid && current.count == 1 && practiceOutputUID == nil ? current.first : nil
+        status = current.isEmpty ? "Choose an audio output" : routeIsValid ? "Ready: \(currentOutput)" : "Approve output: \(currentOutput)"
+    }
+
+    @discardableResult func activate(capture: Bool = false) throws -> String {
+        refreshOutput()
+        let expected = practiceOutputUID ?? (routeIsValid ? outputs.first?.id : nil)
+        guard let expected else { throw Failure.route }
         if practiceOutputUID != nil {
             try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP, .allowBluetoothHFP, .defaultToSpeaker])
         } else if capture { try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP]) }
         else { try session.setCategory(.playback, mode: .spokenAudio) }
         try session.setActive(true)
-        guard playbackRouteIsValid else { throw Failure.route }
-    }
-    var routeIsValid: Bool {
-        guard let routeUID else { return false }
-        return session.currentRoute.outputs.count == 1 && session.currentRoute.outputs.first?.uid == routeUID
+        refreshOutput()
+        guard AudioRouteApproval.isCurrentOutput(expected, outputs: outputs) else { throw Failure.route }
+        return expected
     }
     private var playbackRouteIsValid: Bool {
-        if let practiceOutputUID { return session.currentRoute.outputs.count == 1 && session.currentRoute.outputs.first?.uid == practiceOutputUID }
-        return routeIsValid
+        if let expected = speechOutputUID ?? practiceOutputUID {
+            return AudioRouteApproval.isCurrentOutput(expected, outputs: outputs)
+        }
+        return approvals.accepts(outputs)
     }
     func useCurrentOutputForPractice() throws {
         stopCapture()
-        routeUID = nil
         practiceOutputUID = nil
         try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP, .allowBluetoothHFP, .defaultToSpeaker])
         try session.setActive(true)
         if let input = session.availableInputs?.first(where: { $0.portType == .builtInMic }) { try session.setPreferredInput(input) }
         guard session.currentRoute.outputs.count == 1, let output = session.currentRoute.outputs.first else { throw Failure.practiceRoute }
         practiceOutputUID = output.uid
+        refreshOutput()
         status = "Practice output: \(output.portName)"
     }
     func startPracticeCapture(_ request: SFSpeechAudioBufferRecognitionRequest) async throws {
@@ -101,12 +133,15 @@ import Synchronization
     func endPracticeOutput() {
         stopCapture(); stop(); practiceOutputUID = nil
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        refreshOutput()
     }
-    func speak(_ text: String) async throws {
+    func speak(_ text: String, onStarted: (() -> Void)? = nil) async throws {
         guard completion == nil else { throw Failure.busy }
         try Task.checkCancellation()
-        try activate()
+        let outputUID = try activate()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.interrupted }
+        requestStarted = onStarted
+        speechOutputUID = outputUID
         let utterance = makeSpeechUtterance(text)
         self.utterance = utterance
         let id = UUID()
@@ -129,14 +164,14 @@ import Synchronization
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
     }
     @objc private func routeChanged() {
-        guard (routeUID != nil || practiceOutputUID != nil), !playbackRouteIsValid else { return }
-        stopCapture()
-        practiceOutputUID = nil
-        routeUID = nil
-        synthesizer.stopSpeaking(at: .immediate)
-        finish(.failure(Failure.interrupted))
-        status = "Output changed. Confirm the glasses route again."
-        onInterruption?()
+        if (speechOutputUID != nil || practiceOutputUID != nil), !playbackRouteIsValid {
+            stopCapture()
+            practiceOutputUID = nil
+            synthesizer.stopSpeaking(at: .immediate)
+            finish(.failure(Failure.interrupted))
+            onInterruption?()
+        }
+        refreshOutput()
     }
     @objc private func interrupted() {
         stopCapture()
@@ -147,7 +182,7 @@ import Synchronization
     private func finish(_ result: Result<Void, Error>) {
         let continuation = completion
         if let utterance { _ = callbackIDs.withLock { $0.removeValue(forKey: ObjectIdentifier(utterance)) } }
-        completion = nil; utterance = nil; playbackID = nil; speaking = false
+        completion = nil; utterance = nil; playbackID = nil; requestStarted = nil; speechOutputUID = nil; speaking = false
         continuation?.resume(with: result)
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
@@ -155,6 +190,7 @@ import Synchronization
         Task { @MainActor in
             guard playbackID == id else { return }
             guard playbackRouteIsValid else { stop(); return }
+            requestStarted?(); requestStarted = nil
             onPlaybackStarted?()
         }
     }
