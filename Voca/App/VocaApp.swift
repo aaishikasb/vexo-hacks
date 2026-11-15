@@ -54,6 +54,7 @@ struct SetupView: View {
     @State private var tapGate = BandCueTrigger()
     @State private var tapTask: Task<Void, Never>?
     @State private var tapCalibration = BandTapCalibration()
+    @State private var tasteEpisode: Episode?
     @State private var draftBandNumber = "18"
     @State private var showTapCalibration = false
     @State private var operation = OperationState()
@@ -88,6 +89,7 @@ struct SetupView: View {
                             Button("Prepare on-device guidance") { prepareSoftware() }.buttonStyle(.bordered)
                             Text("Practice uses a simulated scenario. Glasses are optional.").font(.subheadline).foregroundStyle(VocaTheme.secondary)
                         }
+                        NavigationLink("Your style") { TasteProfileView(store: coaching.taste, episodes: coaching.episodes) }.disabled(!coaching.taste.loaded)
                         Text("Cue history").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                         if coaching.episodes.isEmpty {
                             Text("Your cues and feedback will appear here. Request a cue to begin.")
@@ -121,6 +123,7 @@ struct SetupView: View {
         tabs
         .tint(VocaTheme.foreground)
         .foregroundStyle(VocaTheme.foreground)
+        .sheet(item: $tasteEpisode) { episode in TasteFeedbackView(episode: episode, store: coaching.taste) }
         .sheet(item: $reviewingEpisode) { episode in
             NavigationStack {
                 AuditView(episode: episode, store: memory, model: models.executor, canGenerate: softwareReady)
@@ -397,7 +400,12 @@ Form {
                             if episode.delivery == .completed {
                                 ForEach([FeedbackVerdict.helpful, .unhelpful, .notTried], id: \.self) { verdict in
                                     Button(verdict == .helpful ? "Helpful" : verdict == .unhelpful ? "Unhelpful" : "Not tried") {
-                                        Task { await coaching.feedback(verdict, episode: episode) }
+                                        Task {
+                    await coaching.feedback(verdict, episode: episode)
+                    if [.helpful, .unhelpful].contains(verdict), coaching.lastError == nil {
+                        tasteEpisode = coaching.episodes.first { $0.id == episode.id }
+                    }
+                }
                                     }
                                 }
                                 if let feedback = episode.feedback { Text("Saved: \(feedback.verdict.rawValue)").font(.caption) }
@@ -522,7 +530,12 @@ Form {
     @ViewBuilder private func feedbackButtons(_ episode: Episode) -> some View {
         ForEach([FeedbackVerdict.helpful, .unhelpful, .notTried], id: \.self) { verdict in
             Button(verdict == .helpful ? "Helpful" : verdict == .unhelpful ? "Unhelpful" : "Not tried") {
-                Task { await coaching.feedback(verdict, episode: episode) }
+                Task {
+                    await coaching.feedback(verdict, episode: episode)
+                    if [.helpful, .unhelpful].contains(verdict), coaching.lastError == nil {
+                        tasteEpisode = coaching.episodes.first { $0.id == episode.id }
+                    }
+                }
             }.buttonStyle(.bordered).controlSize(.large)
                 .accessibilityAddTraits(episode.feedback?.verdict == verdict ? .isSelected : [])
         }

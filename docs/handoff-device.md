@@ -645,3 +645,39 @@ Actual-source Simulator Review inspected at standard and accessibility3 text;
 expanded disclosure contents and VoiceOver were source-reviewed, not interacted.
 E4B new-prompt and fresh Ray-Ban capture remain unverified. Model weights remain
 fixed; ratings currently personalize strategy utility, not wording taste.
+
+### Explicit taste preferences — 14 November 2026
+
+After a Helpful/Unhelpful rating, the optional Make it yours sheet records
+relaxed wording, less-personal openings, concise wording, and relevance
+preferences, plus a bounded rewrite. Rewrites require a separate approval toggle
+before use as wording examples. Review -> Your style edits/overrides these
+preferences and resets the taste store independently of Core rewards.
+
+TasteStore is app-owned and model/version-independent; canonical Core types and
+reward semantics are unchanged. Only completed live cue feedback contributes;
+notes match the exact feedback event ID, so corrected ratings invalidate stale
+notes. Removing source-dependent episodes prunes their taste notes. Manual
+preferences remain explicit user choices. The backup-excluded, protected store
+writes atomically. Corruption does not silently reset or overwrite the file.
+
+Generation receives at most four explicit preferences and two approved rewrites
+for the same goal. Examples are untrusted style data, never evidence or memories;
+existing source validation still applies. E2B fallback receives the same frozen
+style guidance as the E4B attempt. Model weights remain fixed. This is preference
+conditioning, not learned tone weights, RLHF, or proof of improved taste.
+
+Checks: exact staged commit passed 59 host tests; signed physical build/install passed; integrated host suite 77 passed
+with --no-parallel. The pre-existing 30ms OperationState timeout test failed
+under parallel load; it was not weakened. Simulator actual-source taste profile
+inspected at accessibility3 and feedback sheet at normal text size. Keyboard,
+VoiceOver and full touch submission remain unverified. Physical synthetic E2B
+--taste run reached 21/30 validated cases; final protected report requires an
+unlocked iPhone. No glasses, microphone or personal history used by the harness.
+
+Quality evaluation still needed: collect consented ratings/reasons and preferred
+rewrites, reserve held-out examples from generation prompts, compare baseline
+versus preference-conditioned suggestions in comparable contexts, and have the
+wearer score relevance, factual grounding and sounds-like-me preference. Track
+format/rejection failures separately from quality. Never turn evaluator scores
+or implicit engagement into policy rewards. No measured improvement claimed.

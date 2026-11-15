@@ -29,7 +29,7 @@ import VocaCore
         let planned = cycles.count * countPerCycle
         var rows: [[String: Any]] = []
         var loads: [[String: Any]] = []
-        var report: [String: Any] = ["fixture": "synthetic UIKit images and synthetic text; no playback or microphone", "plannedCases": planned, "stage": "startingPipecat", "startedAt": Date().ISO8601Format()]
+        var report: [String: Any] = ["fixture": "synthetic UIKit images and synthetic text; no playback or microphone", "plannedCases": planned, "syntheticTasteEnabled": ProcessInfo.processInfo.arguments.contains("--taste"), "stage": "startingPipecat", "startedAt": Date().ISO8601Format()]
         func save() {
             report["cases"] = rows; report["loads"] = loads
             report["completedCases"] = rows.count
@@ -86,7 +86,10 @@ import VocaCore
                             row["reloadedAfterFailure"] = true
                         }
                         let snapshot = MemorySnapshot(approvedMemories: [Evidence(sourceID: "fixture-memory", text: "I enjoy making pottery on weekends.", speaker: "wearer", utteredAt: start, shareApproved: true)], dialogue: [], fetchedAt: start, coverage: .unavailable)
-                        let pipeline = CuePipeline(model: fixtureModel, coach: coach)
+                        let style = ProcessInfo.processInfo.arguments.contains("--taste") ?
+                            TasteGuidance(instructions: [TastePreference.relaxed.instruction, TastePreference.concise.instruction],
+                                examples: ["Ask what they recommend, then share a little about your own experience."]) : TasteGuidance()
+                        let pipeline = CuePipeline(model: fixtureModel, coach: coach, taste: style)
                         let cue: CueResult
                         if photoCase {
                             cue = try await pipeline.prepare(photo: photos[(index / 2) % 2], observedAt: start, requestedAt: start, goal: goal, knownPoint: "I make simple pottery mugs on weekends.", snapshot: snapshot)

@@ -3,6 +3,7 @@ import Observation
 import VocaCore
 
 @MainActor @Observable final class CoachingSession {
+    let taste = TasteStore()
     var goal: Goal = .enter
     var knownPoint = ""
     private(set) var status = "Load a model, start the camera, and confirm your glasses audio output."
@@ -29,6 +30,8 @@ import VocaCore
             }
             coach = store
             episodes = await store.episodes()
+            try taste.load()
+            try taste.prune(episodes: episodes)
             let failures = directory.appending(path: "Failures", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: failures, withIntermediateDirectories: true)
             failureDirectory = failures
@@ -47,6 +50,7 @@ import VocaCore
         lastError = nil
         let model = models.executor
         let requestedAt = Date(), goal = self.goal, knownPoint = self.knownPoint
+        let style = taste.guidance(episodes: episodes, goal: goal)
         work = Task {
             var cue: CueResult?
             do {
@@ -55,7 +59,7 @@ import VocaCore
                 status = "Finding a grounded cue on this iPhone…"
                 let requestedProfile = try await model.activeProfile()
                 do {
-                    cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
+                    cue = try await CuePipeline(model: model, coach: coach, taste: style).prepare(photo: photo, observedAt: observedAt,
                         requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
                 } catch {
                     guard requestedProfile.modelID == .gemma4E4B, Self.canUseFallback(after: error) else { throw error }
@@ -66,7 +70,7 @@ import VocaCore
                     try await models.load(modelID: "gemma4E2B")
                     try Task.checkCancellation()
                     // A new pipeline decision records E2B's profile; the failed E4B episode stays failed.
-                    cue = try await CuePipeline(model: model, coach: coach).prepare(photo: photo, observedAt: observedAt,
+                    cue = try await CuePipeline(model: model, coach: coach, taste: style).prepare(photo: photo, observedAt: observedAt,
                         requestedAt: requestedAt, goal: goal, knownPoint: knownPoint, snapshot: snapshot)
                 }
                 guard let cue else { return }
@@ -123,6 +127,7 @@ import VocaCore
         let previousIDs = Set(episodes.map(\.id))
         try await coach.deleteEvidence(sourceID: sourceID)
         episodes = await coach.episodes()
+        try taste.prune(episodes: episodes)
         for id in previousIDs.subtracting(episodes.map(\.id)) {
             failureReasons.removeValue(forKey: id)
             if let directory = failureDirectory { try? FileManager.default.removeItem(at: directory.appending(path: id.uuidString + ".txt")) }
@@ -133,7 +138,7 @@ import VocaCore
         guard let coach else { return }
         do {
             try await coach.applyFeedback(FeedbackEvent(decisionID: episode.id, verdict: verdict,
-                revision: (episode.feedback?.revision ?? 0) + 1))
+                revision: ((await coach.episodes()).first { $0.id == episode.id }?.feedback?.revision ?? 0) + 1))
             episodes = await coach.episodes()
             status = "Feedback saved for this cue’s original model and context."
             lastError = nil
